@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlySight 2 Sensor Fusion Viewer</title>
+  <link rel="stylesheet" href="src/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <h1>FlySight 2 Sensor Fusion Viewer</h1>
+      <div class="file-input">
+        <label for="csvFile">Load Sensor CSV:</label>
+        <input type="file" id="csvFile" accept=".csv" />
+        <span id="fileName">No file loaded</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- 3D Viewer -->
+      <section class="viewer-panel">
+        <div id="threejs-container"></div>
+        <div class="viewer-overlay">
+          <div class="orientation-display">
+            <div><span>Heading:</span> <span id="heading">0.0</span>°</div>
+            <div><span>Pitch:</span> <span id="pitch">0.0</span>°</div>
+            <div><span>Roll:</span> <span id="roll">0.0</span>°</div>
+          </div>
+          <div class="quaternion-display">
+            <div>Q: [<span id="qw">1.00</span>, <span id="qx">0.00</span>, <span id="qy">0.00</span>, <span id="qz">0.00</span>]</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Control Panel -->
+      <aside class="control-panel">
+        <!-- Playback Controls -->
+        <section class="control-section">
+          <h2>Playback</h2>
+          <div class="playback-controls">
+            <button id="playBtn" disabled>▶ Play</button>
+            <button id="pauseBtn" disabled>⏸ Pause</button>
+            <button id="resetBtn" disabled>⏮ Reset</button>
+          </div>
+          <div class="slider-container">
+            <label for="timeSlider">Time:</label>
+            <input type="range" id="timeSlider" min="0" max="100" value="0" disabled />
+            <span id="currentTime">0.000s</span> / <span id="totalTime">0.000s</span>
+          </div>
+          <div class="speed-control">
+            <label for="speedSelect">Speed:</label>
+            <select id="speedSelect">
+              <option value="0.1">0.1x</option>
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="5">5x</option>
+              <option value="10">10x</option>
+            </select>
+          </div>
+        </section>
+
+        <!-- Fusion Parameters -->
+        <section class="control-section">
+          <h2>Madgwick Filter</h2>
+          <div class="param-control">
+            <label for="betaSlider">Beta (gain):</label>
+            <input type="range" id="betaSlider" min="0.01" max="0.5" step="0.01" value="0.1" />
+            <span id="betaValue">0.10</span>
+          </div>
+        </section>
+
+        <!-- Magnetometer Calibration -->
+        <section class="control-section">
+          <h2>Mag Calibration</h2>
+          <div class="param-control">
+            <label>Hard Iron Offset:</label>
+            <div class="xyz-inputs">
+              <input type="number" id="magOffsetX" value="0.3465" step="0.01" />
+              <input type="number" id="magOffsetY" value="-0.0545" step="0.01" />
+              <input type="number" id="magOffsetZ" value="0.5380" step="0.01" />
+            </div>
+          </div>
+          <div class="checkbox-control">
+            <input type="checkbox" id="applyMagTransform" checked />
+            <label for="applyMagTransform">Apply Axis Transform (X,Z inverted)</label>
+          </div>
+          <div class="calibration-actions">
+            <button id="calcCalibrationBtn" disabled>Calculate from Data</button>
+            <button id="showMagPlotBtn" disabled>Show 3D Plot</button>
+          </div>
+          <div id="calibrationResult" class="calibration-result"></div>
+        </section>
+
+        <!-- IMU Calibration -->
+        <section class="control-section">
+          <h2>IMU Calibration</h2>
+          <div class="param-control">
+            <label>Gyro Bias (deg/s):</label>
+            <div class="xyz-inputs">
+              <input type="number" id="gyroBiasX" value="-0.2203" step="0.01" />
+              <input type="number" id="gyroBiasY" value="-0.1055" step="0.01" />
+              <input type="number" id="gyroBiasZ" value="-0.2263" step="0.01" />
+            </div>
+          </div>
+          <div class="param-control">
+            <label>Accel Offset (g):</label>
+            <div class="xyz-inputs">
+              <input type="number" id="accelOffsetX" value="0.0175" step="0.001" />
+              <input type="number" id="accelOffsetY" value="0.0266" step="0.001" />
+              <input type="number" id="accelOffsetZ" value="0.0140" step="0.001" />
+            </div>
+          </div>
+          <div class="calibration-actions">
+            <button id="calcIMUCalBtn" disabled>Calculate from Stationary Data</button>
+            <button id="analyzeIMUBtn" disabled>Analyze IMU Data</button>
+          </div>
+          <div id="imuCalibrationResult" class="calibration-result"></div>
+        </section>
+
+        <!-- Sensor Data Display -->
+        <section class="control-section">
+          <h2>Raw Sensor Data</h2>
+          <div class="sensor-data">
+            <div class="sensor-group">
+              <h3>Gyroscope (deg/s)</h3>
+              <div>X: <span id="gyroX">0.00</span></div>
+              <div>Y: <span id="gyroY">0.00</span></div>
+              <div>Z: <span id="gyroZ">0.00</span></div>
+            </div>
+            <div class="sensor-group">
+              <h3>Accelerometer (g)</h3>
+              <div>X: <span id="accelX">0.00</span></div>
+              <div>Y: <span id="accelY">0.00</span></div>
+              <div>Z: <span id="accelZ">0.00</span></div>
+            </div>
+            <div class="sensor-group">
+              <h3>Magnetometer (gauss)</h3>
+              <div>X: <span id="magX">0.00</span></div>
+              <div>Y: <span id="magY">0.00</span></div>
+              <div>Z: <span id="magZ">0.00</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Statistics -->
+        <section class="control-section">
+          <h2>Data Info</h2>
+          <div class="stats">
+            <div>IMU Samples: <span id="imuCount">0</span></div>
+            <div>MAG Samples: <span id="magCount">0</span></div>
+            <div>Duration: <span id="duration">0.0</span>s</div>
+            <div>IMU Rate: <span id="imuRate">0</span> Hz</div>
+          </div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
