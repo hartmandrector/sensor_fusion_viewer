@@ -72,6 +72,100 @@
             <input type="range" id="betaSlider" min="0.01" max="0.5" step="0.01" value="0.1" />
             <span id="betaValue">0.10</span>
           </div>
+          <div class="checkbox-control">
+            <input type="checkbox" id="initFromSensors" checked />
+            <label for="initFromSensors">Initialize from first sample</label>
+          </div>
+          <div class="checkbox-control">
+            <input type="checkbox" id="useMagnetometer" checked />
+            <label for="useMagnetometer">Use Magnetometer (9-DOF)</label>
+          </div>
+          <div class="checkbox-control">
+            <input type="checkbox" id="showSensorVectors" />
+            <label for="showSensorVectors">Show sensor vectors (Accel/Mag)</label>
+          </div>
+        </section>
+
+        <!-- Axis Remapping -->
+        <section class="control-section">
+          <h2>Axis Mapping</h2>
+          <h3 style="font-size: 0.85rem; margin: 0 0 0.5rem 0; color: var(--accent);">IMU (Accel/Gyro)</h3>
+          <div class="param-control">
+            <label>Body X =</label>
+            <select id="imuRemapX">
+              <option value="+X" selected>+X (sensor)</option>
+              <option value="-X">-X (sensor)</option>
+              <option value="+Y">+Y (sensor)</option>
+              <option value="-Y">-Y (sensor)</option>
+              <option value="+Z">+Z (sensor)</option>
+              <option value="-Z">-Z (sensor)</option>
+            </select>
+          </div>
+          <div class="param-control">
+            <label>Body Y =</label>
+            <select id="imuRemapY">
+              <option value="+X">+X (sensor)</option>
+              <option value="-X">-X (sensor)</option>
+              <option value="+Y" selected>+Y (sensor)</option>
+              <option value="-Y">-Y (sensor)</option>
+              <option value="+Z">+Z (sensor)</option>
+              <option value="-Z">-Z (sensor)</option>
+            </select>
+          </div>
+          <div class="param-control">
+            <label>Body Z =</label>
+            <select id="imuRemapZ">
+              <option value="+X">+X (sensor)</option>
+              <option value="-X">-X (sensor)</option>
+              <option value="+Y">+Y (sensor)</option>
+              <option value="-Y">-Y (sensor)</option>
+              <option value="+Z" selected>+Z (sensor)</option>
+              <option value="-Z">-Z (sensor)</option>
+            </select>
+          </div>
+          
+          <h3 style="font-size: 0.85rem; margin: 1rem 0 0.5rem 0; color: var(--accent);">Magnetometer</h3>
+          <div class="param-control">
+            <label>Body X =</label>
+            <select id="magRemapX">
+              <option value="+X">+X (sensor)</option>
+              <option value="-X" selected>-X (sensor)</option>
+              <option value="+Y">+Y (sensor)</option>
+              <option value="-Y">-Y (sensor)</option>
+              <option value="+Z">+Z (sensor)</option>
+              <option value="-Z">-Z (sensor)</option>
+            </select>
+          </div>
+          <div class="param-control">
+            <label>Body Y =</label>
+            <select id="magRemapY">
+              <option value="+X">+X (sensor)</option>
+              <option value="-X">-X (sensor)</option>
+              <option value="+Y" selected>+Y (sensor)</option>
+              <option value="-Y">-Y (sensor)</option>
+              <option value="+Z">+Z (sensor)</option>
+              <option value="-Z">-Z (sensor)</option>
+            </select>
+          </div>
+          <div class="param-control">
+            <label>Body Z =</label>
+            <select id="magRemapZ">
+              <option value="+X">+X (sensor)</option>
+              <option value="-X">-X (sensor)</option>
+              <option value="+Y">+Y (sensor)</option>
+              <option value="-Y">-Y (sensor)</option>
+              <option value="+Z">+Z (sensor)</option>
+              <option value="-Z" selected>-Z (sensor)</option>
+            </select>
+          </div>
+          
+          <div class="axis-help" style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.75rem; padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 4px;">
+            <strong>Diagnostic:</strong><br>
+            <span id="rawAccelDisplay">Accel: ---</span><br>
+            <span id="rawMagDisplay">Mag: ---</span><br>
+            <span style="margin-top: 0.5rem; display: block;">💡 With Z-up: Accel Z ≈ +1g<br>
+            With Y-north: Mag Y should be positive (Northern hemisphere)</span>
+          </div>
         </section>
 
         <!-- Magnetometer Calibration -->
@@ -80,14 +174,10 @@
           <div class="param-control">
             <label>Hard Iron Offset:</label>
             <div class="xyz-inputs">
-              <input type="number" id="magOffsetX" value="0.3465" step="0.01" />
+              <input type="number" id="magOffsetX" value="-0.3465" step="0.01" />
               <input type="number" id="magOffsetY" value="-0.0545" step="0.01" />
-              <input type="number" id="magOffsetZ" value="0.5380" step="0.01" />
+              <input type="number" id="magOffsetZ" value="-0.5380" step="0.01" />
             </div>
-          </div>
-          <div class="checkbox-control">
-            <input type="checkbox" id="applyMagTransform" checked />
-            <label for="applyMagTransform">Apply Axis Transform (X,Z inverted)</label>
           </div>
           <div class="calibration-actions">
             <button id="calcCalibrationBtn" disabled>Calculate from Data</button>
@@ -102,17 +192,17 @@
           <div class="param-control">
             <label>Gyro Bias (deg/s):</label>
             <div class="xyz-inputs">
-              <input type="number" id="gyroBiasX" value="-0.2203" step="0.01" />
-              <input type="number" id="gyroBiasY" value="-0.1055" step="0.01" />
-              <input type="number" id="gyroBiasZ" value="-0.2263" step="0.01" />
+              <input type="number" id="gyroBiasX" value="-0.1339" step="0.01" />
+              <input type="number" id="gyroBiasY" value="-0.1801" step="0.01" />
+              <input type="number" id="gyroBiasZ" value="-0.2390" step="0.01" />
             </div>
           </div>
           <div class="param-control">
             <label>Accel Offset (g):</label>
             <div class="xyz-inputs">
-              <input type="number" id="accelOffsetX" value="0.0175" step="0.001" />
-              <input type="number" id="accelOffsetY" value="0.0266" step="0.001" />
-              <input type="number" id="accelOffsetZ" value="0.0140" step="0.001" />
+              <input type="number" id="accelOffsetX" value="-0.0118" step="0.001" />
+              <input type="number" id="accelOffsetY" value="0.0123" step="0.001" />
+              <input type="number" id="accelOffsetZ" value="0.0450" step="0.001" />
             </div>
           </div>
           <div class="calibration-actions">

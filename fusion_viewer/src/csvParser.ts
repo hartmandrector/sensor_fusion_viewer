@@ -144,9 +144,25 @@ export function parseCSV(content: string): SensorDataset {
   
   // Compute statistics
   if (dataset.readings.length > 0) {
-    dataset.startTime = dataset.readings[0].timestamp;
-    dataset.endTime = dataset.readings[dataset.readings.length - 1].timestamp;
-    dataset.duration = dataset.endTime - dataset.startTime;
+    // Find first and last IMU timestamps for accurate duration
+    let firstIMU: number | null = null;
+    let lastIMU: number | null = null;
+    for (const reading of dataset.readings) {
+      if (reading.type === 'IMU') {
+        if (firstIMU === null) firstIMU = reading.timestamp;
+        lastIMU = reading.timestamp;
+      }
+    }
+    
+    if (firstIMU !== null && lastIMU !== null) {
+      dataset.startTime = firstIMU;
+      dataset.endTime = lastIMU;
+      dataset.duration = lastIMU - firstIMU;
+    } else {
+      dataset.startTime = dataset.readings[0].timestamp;
+      dataset.endTime = dataset.readings[dataset.readings.length - 1].timestamp;
+      dataset.duration = dataset.endTime - dataset.startTime;
+    }
     
     // Compute sample rates
     if (dataset.imuCount > 1 && dataset.duration > 0) {

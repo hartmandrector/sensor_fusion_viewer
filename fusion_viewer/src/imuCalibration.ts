@@ -95,18 +95,36 @@ export function calculateIMUCalibration(samples: IMUData[]): IMUCalibrationResul
   const gyroBiasZ = meanGz;
   
   // Accel offset - we need to account for gravity
-  // If device is level: expected is [0, 0, 1] (Z up) or [0, 0, -1] (Z down)
-  // We compute offset assuming the dominant axis is gravity
-  // For now, assume device orientation and just report the mean
-  // The offset is what to subtract to get [0, 0, ±1]
+  // When stationary, accel measures reaction to gravity (points UP)
+  // Find which axis has the dominant reading and assume that's the gravity axis
   
-  // Simple approach: assume gravity is mostly in Z
-  // offset = measured - expected
-  const accelOffsetX = meanAx;  // Expected 0
-  const accelOffsetY = meanAy;  // Expected 0
-  // For Z, we expect ~1.0 (if Z is up) or ~-1.0 (if Z is down)
-  // Looking at sample data, az is positive ~0.98, so Z points up
-  const accelOffsetZ = meanAz - 1.0;  // Offset from expected 1.0g
+  const absMeanAx = Math.abs(meanAx);
+  const absMeanAy = Math.abs(meanAy);
+  const absMeanAz = Math.abs(meanAz);
+  
+  let accelOffsetX: number;
+  let accelOffsetY: number;
+  let accelOffsetZ: number;
+  
+  if (absMeanAy >= absMeanAx && absMeanAy >= absMeanAz) {
+    // Y is the gravity axis (FlySight upright - Y points up)
+    accelOffsetX = meanAx;  // Expected 0
+    accelOffsetY = meanAy - Math.sign(meanAy) * 1.0;  // Expected ±1g
+    accelOffsetZ = meanAz;  // Expected 0
+    console.log(`IMU Cal: Gravity detected on Y axis (${meanAy.toFixed(3)}g)`);
+  } else if (absMeanAz >= absMeanAx && absMeanAz >= absMeanAy) {
+    // Z is the gravity axis
+    accelOffsetX = meanAx;  // Expected 0
+    accelOffsetY = meanAy;  // Expected 0
+    accelOffsetZ = meanAz - Math.sign(meanAz) * 1.0;  // Expected ±1g
+    console.log(`IMU Cal: Gravity detected on Z axis (${meanAz.toFixed(3)}g)`);
+  } else {
+    // X is the gravity axis
+    accelOffsetX = meanAx - Math.sign(meanAx) * 1.0;  // Expected ±1g
+    accelOffsetY = meanAy;  // Expected 0
+    accelOffsetZ = meanAz;  // Expected 0
+    console.log(`IMU Cal: Gravity detected on X axis (${meanAx.toFixed(3)}g)`);
+  }
   
   return {
     gyroBiasX,

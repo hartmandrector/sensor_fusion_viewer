@@ -5,7 +5,7 @@
  * with playback controls for tuning and validation.
  */
 
-import { MadgwickAHRS, RAD_TO_DEG, type MagCalibration, type IMUCalibration } from './fusion';
+import { MadgwickAHRS, RAD_TO_DEG, type MagCalibration, type IMUCalibration, type AxisRemap } from './fusion';
 import { parseCSV, getMAGReadings, getIMUReadings, type SensorDataset, type IMUData, type MAGData } from './csvParser';
 import { OrientationViewer } from './viewer';
 import { calculateHardIronCalibration, evaluateCalibrationQuality, type MagCalibrationResult } from './magCalibration';
@@ -31,6 +31,7 @@ interface FusionFrame {
   heading: number;
   imu?: IMUData;
   mag?: MAGData;
+  calibratedMag?: { x: number; y: number; z: number };
 }
 let fusionFrames: FusionFrame[] = [];
 
@@ -47,10 +48,20 @@ const elements = {
   speedSelect: document.getElementById('speedSelect') as HTMLSelectElement,
   betaSlider: document.getElementById('betaSlider') as HTMLInputElement,
   betaValue: document.getElementById('betaValue') as HTMLSpanElement,
+  initFromSensors: document.getElementById('initFromSensors') as HTMLInputElement,
+  useMagnetometer: document.getElementById('useMagnetometer') as HTMLInputElement,
+  showSensorVectors: document.getElementById('showSensorVectors') as HTMLInputElement,
+  imuRemapX: document.getElementById('imuRemapX') as HTMLSelectElement,
+  imuRemapY: document.getElementById('imuRemapY') as HTMLSelectElement,
+  imuRemapZ: document.getElementById('imuRemapZ') as HTMLSelectElement,
+  magRemapX: document.getElementById('magRemapX') as HTMLSelectElement,
+  magRemapY: document.getElementById('magRemapY') as HTMLSelectElement,
+  magRemapZ: document.getElementById('magRemapZ') as HTMLSelectElement,
+  rawAccelDisplay: document.getElementById('rawAccelDisplay') as HTMLSpanElement,
+  rawMagDisplay: document.getElementById('rawMagDisplay') as HTMLSpanElement,
   magOffsetX: document.getElementById('magOffsetX') as HTMLInputElement,
   magOffsetY: document.getElementById('magOffsetY') as HTMLInputElement,
   magOffsetZ: document.getElementById('magOffsetZ') as HTMLInputElement,
-  applyMagTransform: document.getElementById('applyMagTransform') as HTMLInputElement,
   heading: document.getElementById('heading') as HTMLSpanElement,
   pitch: document.getElementById('pitch') as HTMLSpanElement,
   roll: document.getElementById('roll') as HTMLSpanElement,
@@ -91,22 +102,23 @@ let lastCalibrationResult: MagCalibrationResult | null = null;
 let lastIMUCalibrationResult: IMUCalibrationResult | null = null;
 
 // Default calibration values (FlySight S.N. 2-00176)
+// Calibrated with correct MAG axis remap (-X, +Y, -Z)
 const DEFAULT_MAG_OFFSET = {
-  x: 0.3465,
+  x: -0.3465,
   y: -0.0545,
-  z: 0.5380
+  z: -0.5380
 };
 
 const DEFAULT_GYRO_BIAS = {
-  x: -0.2203,
-  y: -0.1055,
-  z: -0.2263
+  x: -0.1339,
+  y: -0.1801,
+  z: -0.2390
 };
 
 const DEFAULT_ACCEL_OFFSET = {
-  x: 0.0175,
-  y: 0.0266,
-  z: 0.0140
+  x: -0.0118,
+  y: 0.0123,
+  z: 0.0450
 };
 
 /**
@@ -137,7 +149,6 @@ function init(): void {
   // Initialize AHRS with default settings including all calibration
   ahrs = new MadgwickAHRS({
     beta: 0.1,
-    applyMagTransform: true,
     magCalibration: {
       offsetX: DEFAULT_MAG_OFFSET.x,
       offsetY: DEFAULT_MAG_OFFSET.y,
@@ -175,12 +186,22 @@ function setupEventListeners(): void {
   
   // Filter parameters
   elements.betaSlider.addEventListener('input', handleBetaChange);
+  elements.initFromSensors.addEventListener('change', handleInitModeChange);
+  elements.useMagnetometer.addEventListener('change', handleUseMagChange);
+  elements.showSensorVectors.addEventListener('change', handleShowVectorsChange);
+  
+  // Axis remapping
+  elements.imuRemapX.addEventListener('change', handleAxisRemapChange);
+  elements.imuRemapY.addEventListener('change', handleAxisRemapChange);
+  elements.imuRemapZ.addEventListener('change', handleAxisRemapChange);
+  elements.magRemapX.addEventListener('change', handleAxisRemapChange);
+  elements.magRemapY.addEventListener('change', handleAxisRemapChange);
+  elements.magRemapZ.addEventListener('change', handleAxisRemapChange);
   
   // Mag calibration
   elements.magOffsetX.addEventListener('change', handleMagCalChange);
   elements.magOffsetY.addEventListener('change', handleMagCalChange);
   elements.magOffsetZ.addEventListener('change', handleMagCalChange);
-  elements.applyMagTransform.addEventListener('change', handleMagTransformChange);
   elements.calcCalibrationBtn.addEventListener('click', handleCalculateCalibration);
   elements.showMagPlotBtn.addEventListener('click', handleShowMagPlot);
   
@@ -257,34 +278,89 @@ function computeFusionFrames(): void {
   fusionFrames = [];
   ahrs.reset();
   
-  let lastTimestamp = dataset.startTime;
+  let lastIMUTimestamp = dataset.startTime;
   let lastIMU: IMUData | undefined;
   let lastMAG: MAGData | undefined;
   
-  for (const reading of dataset.readings) {
-    const dt = reading.timestamp - lastTimestamp;
-    lastTimestamp = reading.timestamp;
+  // If init from sensors is enabled, we need to find initial accel+mag
+  const initFromSensors = elements.initFromSensors.checked;
+  const useMag = elements.useMagnetometer.checked;
+  let initAccel: IMUData | null = null;
+  let initMag: MAGData | null = null;
+  
+  // First pass: find initial readings if needed
+  if (initFromSensors) {
+    for (const reading of dataset.readings) {
+      if (reading.type === 'IMU' && !initAccel) {
+        initAccel = reading;
+      }
+      if (reading.type === 'MAG' && !initMag) {
+        initMag = reading;
+      }
+      if (initAccel && initMag) break;
+    }
     
+    if (initAccel && (initMag || !useMag)) {
+      // Apply calibration to initial readings
+      const ax = initAccel.ax - (ahrs.getIMUCalibration().accelOffsetX);
+      const ay = initAccel.ay - (ahrs.getIMUCalibration().accelOffsetY);
+      const az = initAccel.az - (ahrs.getIMUCalibration().accelOffsetZ);
+      
+      if (useMag && initMag) {
+        // Apply mag calibration (axis remap is handled internally by initFromAccelMag)
+        const magCal = ahrs.getMagCalibration();
+        const mx = (initMag.x - magCal.offsetX) * magCal.scaleX;
+        const my = (initMag.y - magCal.offsetY) * magCal.scaleY;
+        const mz = (initMag.z - magCal.offsetZ) * magCal.scaleZ;
+        
+        ahrs.initFromAccelMag(ax, ay, az, mx, my, mz);
+        console.log('Initialized from first accel+mag sample');
+      } else {
+        // 6-DOF init from accel only - sets level but heading = 0
+        ahrs.initFromAccelOnly(ax, ay, az);
+        console.log('Initialized from first accel sample (6-DOF)');
+      }
+    }
+  }
+  
+  let frameCount = 0;
+  for (const reading of dataset.readings) {
     if (reading.type === 'MAG') {
       lastMAG = reading;
-      ahrs.updateMag(reading.x, reading.y, reading.z);
+      if (useMag) {
+        ahrs.updateMag(reading.x, reading.y, reading.z);
+      }
     } else if (reading.type === 'IMU') {
+      let dt = reading.timestamp - lastIMUTimestamp;
+      lastIMUTimestamp = reading.timestamp;
+      
+      // Sanity check: dt should be small (< 0.1s for 10Hz minimum rate)
+      if (dt > 0.1 || dt < 0) {
+        dt = 0.0025;  // Default to ~400Hz
+      }
+      
       lastIMU = reading;
+      
       ahrs.updateIMU(
         dt > 0 ? dt : 0.0025,  // Default to ~400Hz if dt is 0
         reading.wx, reading.wy, reading.wz,
         reading.ax, reading.ay, reading.az
       );
       
-      // Store frame
+      frameCount++;
+      
+      // Store frame (also store calibrated mag for visualization)
       const output = ahrs.getOutput();
+      const calMag = ahrs.getCalibratedMag();
+      
       fusionFrames.push({
         timestamp: reading.timestamp,
         quaternion: output.quaternion,
         euler: output.euler,
         heading: output.heading,
         imu: lastIMU,
-        mag: lastMAG
+        mag: lastMAG,
+        calibratedMag: calMag.valid ? { x: calMag.x, y: calMag.y, z: calMag.z } : undefined
       });
     }
   }
@@ -425,14 +501,63 @@ function handleMagCalChange(): void {
 }
 
 /**
- * Handle magnetometer transform toggle
+ * Handle init mode change
  */
-function handleMagTransformChange(): void {
+function handleInitModeChange(): void {
+  if (dataset) {
+    computeFusionFrames();
+    updateDisplay(playbackIndex);
+  }
+}
+
+/**
+ * Handle magnetometer enable/disable
+ */
+function handleUseMagChange(): void {
+  if (dataset) {
+    computeFusionFrames();
+    updateDisplay(playbackIndex);
+  }
+}
+
+/**
+ * Handle show sensor vectors toggle
+ */
+function handleShowVectorsChange(): void {
+  if (viewer) {
+    viewer.toggleSensorVectors(elements.showSensorVectors.checked);
+    updateDisplay(playbackIndex);
+  }
+}
+
+/**
+ * Handle axis remap change
+ */
+function handleAxisRemapChange(): void {
   if (!ahrs) return;
   
-  ahrs.setApplyMagTransform(elements.applyMagTransform.checked);
-  computeFusionFrames();
-  updateDisplay(playbackIndex);
+  const imuRemap: AxisRemap = {
+    bodyX: elements.imuRemapX.value as AxisRemap['bodyX'],
+    bodyY: elements.imuRemapY.value as AxisRemap['bodyY'],
+    bodyZ: elements.imuRemapZ.value as AxisRemap['bodyZ']
+  };
+  
+  const magRemap: AxisRemap = {
+    bodyX: elements.magRemapX.value as AxisRemap['bodyX'],
+    bodyY: elements.magRemapY.value as AxisRemap['bodyY'],
+    bodyZ: elements.magRemapZ.value as AxisRemap['bodyZ']
+  };
+  
+  ahrs.setIMUAxisRemap(imuRemap);
+  ahrs.setMagAxisRemap(magRemap);
+  
+  if (dataset) {
+    computeFusionFrames();
+    updateDisplay(playbackIndex);
+  }
+  
+  console.log('IMU axis remap:', imuRemap);
+  console.log('MAG axis remap:', magRemap);
 }
 
 /**
@@ -445,6 +570,21 @@ function updateDisplay(frameIndex: number): void {
   
   // Update 3D viewer
   viewer.setOrientation(frame.quaternion);
+  
+  // Update sensor vectors if enabled
+  if (elements.showSensorVectors.checked && frame.imu && ahrs) {
+    // Get calibrated accel in body frame (apply calibration + axis remap)
+    const imuCal = ahrs.getIMUCalibration();
+    const rawAccel = {
+      x: frame.imu.ax - imuCal.accelOffsetX,
+      y: frame.imu.ay - imuCal.accelOffsetY,
+      z: frame.imu.az - imuCal.accelOffsetZ
+    };
+    // Apply axis remap to get body frame
+    const accel = ahrs.applyIMURemap(rawAccel.x, rawAccel.y, rawAccel.z);
+    
+    viewer.updateSensorVectors(accel, frame.calibratedMag || null);
+  }
   
   // Update orientation display
   elements.heading.textContent = frame.heading.toFixed(1);
@@ -469,12 +609,31 @@ function updateDisplay(frameIndex: number): void {
     elements.accelX.textContent = frame.imu.ax.toFixed(4);
     elements.accelY.textContent = frame.imu.ay.toFixed(4);
     elements.accelZ.textContent = frame.imu.az.toFixed(4);
+    
+    // Update diagnostic display with raw and remapped values
+    const imuCal = ahrs?.getIMUCalibration();
+    const calAccel = {
+      x: frame.imu.ax - (imuCal?.accelOffsetX ?? 0),
+      y: frame.imu.ay - (imuCal?.accelOffsetY ?? 0),
+      z: frame.imu.az - (imuCal?.accelOffsetZ ?? 0)
+    };
+    const remapped = ahrs?.applyIMURemap(calAccel.x, calAccel.y, calAccel.z);
+    if (remapped) {
+      elements.rawAccelDisplay.innerHTML = 
+        `Raw: [${calAccel.x.toFixed(2)}, ${calAccel.y.toFixed(2)}, ${calAccel.z.toFixed(2)}]<br>` +
+        `Body: [${remapped.x.toFixed(2)}, ${remapped.y.toFixed(2)}, ${remapped.z.toFixed(2)}]`;
+    }
   }
   
   if (frame.mag) {
     elements.magX.textContent = frame.mag.x.toFixed(3);
     elements.magY.textContent = frame.mag.y.toFixed(3);
     elements.magZ.textContent = frame.mag.z.toFixed(3);
+    
+    // Update diagnostic raw display (after mag transform but before axis remap)
+    if (frame.calibratedMag) {
+      elements.rawMagDisplay.textContent = `Mag: X=${frame.calibratedMag.x.toFixed(3)}, Y=${frame.calibratedMag.y.toFixed(3)}, Z=${frame.calibratedMag.z.toFixed(3)}`;
+    }
   }
 }
 
@@ -485,9 +644,10 @@ function handleCalculateCalibration(): void {
   if (!dataset) return;
   
   const magSamples = getMAGReadings(dataset);
-  const applyTransform = elements.applyMagTransform.checked;
   
-  lastCalibrationResult = calculateHardIronCalibration(magSamples, applyTransform);
+  // Calculate calibration on raw mag data (no axis transform)
+  // The axis remap dropdowns handle coordinate transformation separately
+  lastCalibrationResult = calculateHardIronCalibration(magSamples, false);
   const quality = evaluateCalibrationQuality(lastCalibrationResult);
   
   // Build result HTML
@@ -546,15 +706,14 @@ function handleShowMagPlot(): void {
   if (!dataset || !viewer) return;
   
   const magSamples = getMAGReadings(dataset);
-  const applyTransform = elements.applyMagTransform.checked;
   
   // Get current calibration offsets
   const offsetX = parseFloat(elements.magOffsetX.value) || 0;
   const offsetY = parseFloat(elements.magOffsetY.value) || 0;
   const offsetZ = parseFloat(elements.magOffsetZ.value) || 0;
   
-  // Toggle visualization in the viewer
-  viewer.toggleMagPlot(magSamples, applyTransform, { offsetX, offsetY, offsetZ });
+  // Toggle visualization in the viewer (show raw data without transform)
+  viewer.toggleMagPlot(magSamples, { offsetX, offsetY, offsetZ });
 }
 
 /**

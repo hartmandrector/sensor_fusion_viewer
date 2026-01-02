@@ -19,6 +19,13 @@ export class OrientationViewer {
   private animationId: number | null = null;
   private showingMagPlot: boolean = false;
   
+  // Sensor vector visualization
+  private sensorVectorsGroup: THREE.Group;
+  private accelArrow: THREE.ArrowHelper | null = null;
+  private magArrow: THREE.ArrowHelper | null = null;
+  private magWorldArrow: THREE.ArrowHelper | null = null;  // Mag in world frame
+  private showSensorVectors: boolean = false;
+  
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
     if (!container) {
@@ -46,6 +53,10 @@ export class OrientationViewer {
     this.deviceGroup = new THREE.Group();
     this.scene.add(this.deviceGroup);
     
+    // Sensor vectors group (attached to device, shows raw sensor readings)
+    this.sensorVectorsGroup = new THREE.Group();
+    this.deviceGroup.add(this.sensorVectorsGroup);
+    
     // Create scene elements
     this.createDevice();
     this.createReferenceFrame();
@@ -61,9 +72,13 @@ export class OrientationViewer {
   
   /**
    * Create the FlySight device representation
+   * 
+   * Device orientation: Z out front face (into screen/-Z in Three.js when at identity)
+   * Y toward LED/top (up/+Y in Three.js), X to right side (+X in Three.js)
    */
   private createDevice(): void {
     // Main body - rectangular prism representing FlySight
+    // Dimensions: Width (X) = 0.6, Height (Y) = 1.2, Depth (Z) = 0.3
     const bodyGeometry = new THREE.BoxGeometry(0.6, 1.2, 0.3);
     const bodyMaterial = new THREE.MeshPhongMaterial({ 
       color: 0x2a2a4a,
@@ -73,51 +88,64 @@ export class OrientationViewer {
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
     this.deviceGroup.add(body);
     
-    // LED indicator (top front)
+    // LED indicator (top, toward front face which is at -Z)
     const ledGeometry = new THREE.SphereGeometry(0.05, 16, 16);
     const ledMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
     const led = new THREE.Mesh(ledGeometry, ledMaterial);
-    led.position.set(0, 0.55, 0.16);
+    led.position.set(0, 0.55, -0.16);  // Front is now -Z
     this.deviceGroup.add(led);
     
-    // USB port indicator (bottom)
+    // USB port indicator (bottom, toward back which is at +Z)
     const usbGeometry = new THREE.BoxGeometry(0.15, 0.05, 0.1);
     const usbMaterial = new THREE.MeshPhongMaterial({ color: 0x444444 });
     const usb = new THREE.Mesh(usbGeometry, usbMaterial);
-    usb.position.set(0, -0.6, 0.1);
+    usb.position.set(0, -0.6, 0.1);  // Back is +Z
     this.deviceGroup.add(usb);
     
-    // Front face indicator (screen area)
+    // Front face indicator (screen area) - on -Z face
     const screenGeometry = new THREE.PlaneGeometry(0.4, 0.6);
     const screenMaterial = new THREE.MeshPhongMaterial({ 
       color: 0x111111,
       side: THREE.FrontSide
     });
     const screen = new THREE.Mesh(screenGeometry, screenMaterial);
-    screen.position.set(0, 0, 0.151);
+    screen.position.set(0, 0, -0.151);  // Front face at -Z
+    screen.rotation.y = Math.PI;  // Rotate to face -Z direction
     this.deviceGroup.add(screen);
     
-    // Device axes (body frame)
+    // Device axes showing SENSOR FRAME labels (X, Y, Z)
+    // FlySight 2 physical device orientation:
+    //   Device Z = out the FRONT face (toward screen/North when upright facing North)
+    //   Device Y = toward LED/TOP (up when device is upright)
+    //   Device X = to the LEFT side when looking at front face (West when facing North)
+    //
+    // Three.js coordinate system:
+    //   Three.js Y = up
+    //   Three.js -Z = forward (into screen, toward North marker)
+    //   Three.js -X = left (West)
+    //
+    // Mapping: Device X → Three.js -X, Device Y → Three.js +Y, Device Z → Three.js -Z
     const axisLength = 1.0;
     
-    // X axis (red) - points RIGHT
+    // Device X axis (red) - maps to Three.js -X (left/West)
     const xAxis = this.createArrow(0xff0000, axisLength);
-    xAxis.rotation.z = -Math.PI / 2;
+    xAxis.rotation.z = Math.PI / 2;  // Rotate from +Y to -X (left)
     this.deviceGroup.add(xAxis);
     
-    // Y axis (green) - points UP (toward LED)
-    const yAxis = this.createArrow(0x00ff00, axisLength);
+    // Device Y axis (yellow) - maps to Three.js +Y (up)
+    const yAxis = this.createArrow(0xffff00, axisLength);
+    // No rotation - default arrow points +Y which is up
     this.deviceGroup.add(yAxis);
     
-    // Z axis (blue) - points OUT (front face)
+    // Device Z axis (blue) - maps to Three.js -Z (forward, into screen)
     const zAxis = this.createArrow(0x0088ff, axisLength);
-    zAxis.rotation.x = Math.PI / 2;
+    zAxis.rotation.x = -Math.PI / 2;  // Rotate from +Y to -Z (forward into screen)
     this.deviceGroup.add(zAxis);
     
-    // Axis labels
-    this.addAxisLabel('X', new THREE.Vector3(axisLength + 0.15, 0, 0), 0xff0000);
-    this.addAxisLabel('Y', new THREE.Vector3(0, axisLength + 0.15, 0), 0x00ff00);
-    this.addAxisLabel('Z', new THREE.Vector3(0, 0, axisLength + 0.15), 0x0088ff);
+    // Axis labels positioned in Three.js local frame
+    this.addAxisLabel('X', new THREE.Vector3(-(axisLength + 0.15), 0, 0), 0xff0000);
+    this.addAxisLabel('Y', new THREE.Vector3(0, axisLength + 0.15, 0), 0xffff00);
+    this.addAxisLabel('Z', new THREE.Vector3(0, 0, -(axisLength + 0.15)), 0x0088ff);
   }
   
   /**
@@ -168,19 +196,24 @@ export class OrientationViewer {
   
   /**
    * Create the world reference frame
+   * 
+   * World frame convention (viewing from above, Y pointing up out of screen):
+   *   North = into screen (-Z in Three.js)
+   *   East = right (+X in Three.js)
+   *   Up = up (+Y in Three.js)
    */
   private createReferenceFrame(): void {
     const refGroup = new THREE.Group();
     const axisLength = 2.0;
     const opacity = 0.3;
     
-    // North (X) - red dashed
+    // North - into screen (-Z), pink dashed
     const northGeometry = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(axisLength, 0, 0)
+      new THREE.Vector3(0, 0, -axisLength)
     ]);
     const northMaterial = new THREE.LineDashedMaterial({ 
-      color: 0xff4444, 
+      color: 0xff88aa, 
       dashSize: 0.1, 
       gapSize: 0.05,
       opacity,
@@ -190,10 +223,10 @@ export class OrientationViewer {
     north.computeLineDistances();
     refGroup.add(north);
     
-    // East (Y) - green dashed
+    // East - right (+X), green dashed
     const eastGeometry = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, axisLength)
+      new THREE.Vector3(axisLength, 0, 0)
     ]);
     const eastMaterial = new THREE.LineDashedMaterial({ 
       color: 0x44ff44, 
@@ -206,7 +239,7 @@ export class OrientationViewer {
     east.computeLineDistances();
     refGroup.add(east);
     
-    // Down (Z) - blue dashed
+    // Down - down (-Y), blue dashed
     const downGeometry = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(0, -axisLength, 0)
@@ -222,8 +255,8 @@ export class OrientationViewer {
     down.computeLineDistances();
     refGroup.add(down);
     
-    // North label
-    this.addWorldLabel('N', new THREE.Vector3(axisLength + 0.2, 0, 0));
+    // North label (at -Z, into screen)
+    this.addWorldLabel('N', new THREE.Vector3(0, 0, -(axisLength + 0.2)));
     
     this.scene.add(refGroup);
   }
@@ -285,10 +318,86 @@ export class OrientationViewer {
   
   /**
    * Update device orientation from quaternion
+   * 
+   * The AHRS outputs orientation in NWU frame (X=North, Y=West, Z=Up).
+   * The Three.js model is set up to match the body frame visualization.
+   * 
+   * Rather than transform the quaternion components (which is complex),
+   * we apply a coordinate system rotation.
+   * 
+   * NWU world frame: X=North, Y=West, Z=Up
+   * Three.js world: X=East, Y=Up, Z=South (looking at -Z for North)
+   * 
+   * To convert: we need to rotate the NWU frame to align with Three.js
+   * - NWU_X (North) should become Three.js -Z
+   * - NWU_Y (West) should become Three.js -X
+   * - NWU_Z (Up) should become Three.js +Y
    */
   setOrientation(q: Quaternion): void {
-    // Three.js uses (x, y, z, w) order for quaternions
-    this.deviceGroup.quaternion.set(q.x, q.y, q.z, q.w);
+    // Create the NWU quaternion
+    const qNWU = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+    
+    // Rotation to transform from NWU to Three.js coordinates
+    // This is a fixed rotation that maps:
+    //   NWU_X (North) -> Three.js -Z
+    //   NWU_Y (West) -> Three.js -X  
+    //   NWU_Z (Up) -> Three.js +Y
+    //
+    // This is equivalent to: rotate -90° around Y, then -90° around X
+    // Or we can compute it directly from axis mapping.
+    //
+    // The rotation matrix for this transform is:
+    //   [ 0, -1,  0 ]   X_three = -NWU_Y
+    //   [ 0,  0,  1 ]   Y_three = NWU_Z
+    //   [-1,  0,  0 ]   Z_three = -NWU_X
+    //
+    // Converting to quaternion: this is a 90° rotation around (1,0,1)/sqrt(2) axis
+    // Actually let's just compute it step by step:
+    // Step 1: Rotate 90° CCW around Y (looking down Y): X->-Z, Z->X
+    // Step 2: Rotate 90° CCW around X (looking down X): Y->Z, Z->-Y
+    //
+    // Combined: X -> -Z -> -(-Y) = Y... hmm that's not right.
+    //
+    // Let me just compute the quaternion for the axis mapping directly.
+    // We want the rotation that takes NWU basis to Three.js basis.
+    
+    // Actually, the simplest approach: apply the inverse mapping
+    // If v_three = R * v_nwu, then for quaternions:
+    // q_three = q_coordChange * q_nwu * q_coordChange^-1 (conjugation)
+    //
+    // For our mapping, q_coordChange rotates NWU frame to Three.js frame.
+    // NWU: X=N, Y=W, Z=U -> Three.js: -Z=N, -X=W, Y=U
+    // This is: first rotate 90° around Z (NWU), then 90° around X (in new frame)
+    //
+    // Let's just use a simpler empirical approach:
+    // Apply quaternion with axes swapped to match Three.js conventions
+    
+    // The model in Three.js has:
+    // - Device front (body Z = North) pointing in Three.js -Z direction
+    // - Device up (body Y = Up) pointing in Three.js +Y direction
+    // - Device left (body X = West) pointing in Three.js -X direction
+    //
+    // The NWU quaternion rotates NWU axes. We need to apply this rotation
+    // but with the axes interpreted in Three.js space.
+    //
+    // NWU X rotation (around North) -> Three.js -Z rotation
+    // NWU Y rotation (around West) -> Three.js -X rotation  
+    // NWU Z rotation (around Up) -> Three.js +Y rotation
+    
+    const qx_three = -q.z;  // NWU X (North) rotation -> -Z rotation in Three.js (negated)
+    const qy_three = q.x;   // NWU Z (Up) rotation -> Y rotation in Three.js... wait
+    
+    // Actually let me think about this differently.
+    // The quaternion components qx, qy, qz represent rotation around X, Y, Z axes.
+    // 
+    // In NWU: qx = rotation around North, qy = rotation around West, qz = rotation around Up
+    // In Three.js we want: rotation around -Z (North), -X (West), Y (Up)
+    //
+    // So: NWU qx (North rot) -> Three.js qz with negation (since North = -Z)
+    //     NWU qy (West rot) -> Three.js qx with negation (since West = -X)
+    //     NWU qz (Up rot) -> Three.js qy (since Up = Y)
+    
+    this.deviceGroup.quaternion.set(-q.y, q.z, -q.x, q.w);
   }
   
   /**
@@ -329,10 +438,10 @@ export class OrientationViewer {
   
   /**
    * Toggle magnetometer 3D scatter plot
+   * Shows raw mag data for calibration visualization
    */
   toggleMagPlot(
     samples: MAGData[],
-    applyTransform: boolean,
     calibration: { offsetX: number; offsetY: number; offsetZ: number }
   ): void {
     // If already showing, remove it
@@ -365,10 +474,10 @@ export class OrientationViewer {
     const calPositions: number[] = [];
     
     for (const sample of samples) {
-      // Transform to device frame if needed
-      let x = applyTransform ? -sample.x : sample.x;
-      let y = sample.y;
-      let z = applyTransform ? -sample.z : sample.z;
+      // Use raw sensor data (no transform - axis remap is separate)
+      const x = sample.x;
+      const y = sample.y;
+      const z = sample.z;
       
       // Raw positions (before calibration)
       rawPositions.push(x * scale, y * scale, z * scale);
@@ -445,6 +554,102 @@ export class OrientationViewer {
     // Adjust camera for better view
     this.camera.position.set(3, 3, 3);
     this.camera.lookAt(0, 0, 0);
+  }
+  
+  /**
+   * Toggle sensor vector visualization
+   */
+  toggleSensorVectors(show: boolean): void {
+    this.showSensorVectors = show;
+    this.sensorVectorsGroup.visible = show;
+    if (this.magWorldArrow) {
+      this.magWorldArrow.visible = show;
+    }
+  }
+  
+  /**
+   * Update sensor vectors (raw readings in body frame)
+   * These show the actual sensor readings attached to the device
+   * Also shows mag in WORLD frame (cyan) so it stays fixed even if AHRS drifts
+   * 
+   * @param accel Accelerometer reading [x, y, z] in g
+   * @param mag Magnetometer reading [x, y, z] in gauss (after calibration and remap)
+   */
+  updateSensorVectors(
+    accel: { x: number; y: number; z: number },
+    mag: { x: number; y: number; z: number } | null
+  ): void {
+    if (!this.showSensorVectors) return;
+    
+    // Remove old arrows
+    if (this.accelArrow) {
+      this.sensorVectorsGroup.remove(this.accelArrow);
+      this.accelArrow.dispose();
+    }
+    if (this.magArrow) {
+      this.sensorVectorsGroup.remove(this.magArrow);
+      this.magArrow.dispose();
+    }
+    if (this.magWorldArrow) {
+      this.scene.remove(this.magWorldArrow);
+      this.magWorldArrow.dispose();
+      this.magWorldArrow = null;
+    }
+    
+    // Sensor readings are in device body frame:
+    //   Device X = left (West when facing North), Device Y = up, Device Z = forward (out front face)
+    // Three.js local frame:
+    //   Three.js -X = left (West), Three.js Y = up, Three.js -Z = forward (North)
+    // So: Device X → -X, Device Y → +Y, Device Z → -Z
+    const sensorToLocal = (v: { x: number; y: number; z: number }) => {
+      return new THREE.Vector3(-v.x, v.y, -v.z);
+    };
+    
+    // Accelerometer vector (yellow) - shows gravity direction in body frame
+    const accelLocal = sensorToLocal(accel);
+    const accelDir = accelLocal.clone().normalize();
+    const accelLength = accelLocal.length();
+    this.accelArrow = new THREE.ArrowHelper(
+      accelDir,
+      new THREE.Vector3(0, 0, 0),
+      accelLength * 1.5,  // Scale for visibility
+      0xffff00,  // Yellow
+      0.2,
+      0.1
+    );
+    this.sensorVectorsGroup.add(this.accelArrow);
+    
+    // Magnetometer vector (magenta) - shows magnetic north in body frame (attached to device)
+    if (mag) {
+      const magLocal = sensorToLocal(mag);
+      const magDir = magLocal.clone().normalize();
+      const magLength = magLocal.length();
+      this.magArrow = new THREE.ArrowHelper(
+        magDir,
+        new THREE.Vector3(0, 0, 0),
+        magLength * 3.0,  // Scale for visibility (mag values are smaller)
+        0xff00ff,  // Magenta - body frame
+        0.2,
+        0.1
+      );
+      this.sensorVectorsGroup.add(this.magArrow);
+      
+      // Magnetometer vector in WORLD frame (cyan)
+      // Transform body-frame mag to world frame using current device orientation
+      // This should stay pointing at magnetic north regardless of AHRS drift
+      const magLocalVec = magLocal.clone();
+      magLocalVec.applyQuaternion(this.deviceGroup.quaternion);
+      const magWorldDir = magLocalVec.normalize();
+      this.magWorldArrow = new THREE.ArrowHelper(
+        magWorldDir,
+        new THREE.Vector3(0, 0, 0),
+        magLength * 3.0,
+        0x00ffff,  // Cyan - world frame
+        0.2,
+        0.1
+      );
+      this.scene.add(this.magWorldArrow);
+    }
   }
   
   /**
