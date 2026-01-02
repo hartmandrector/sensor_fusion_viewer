@@ -5,11 +5,13 @@
  * with playback controls for tuning and validation.
  */
 
-import { MadgwickAHRS, RAD_TO_DEG, type MagCalibration, type IMUCalibration, type AxisRemap } from './fusion';
+import { MadgwickAHRS, RAD_TO_DEG } from './fusion';
+import type { MagCalibration, IMUCalibration, AxisRemap } from './types';
 import { parseCSV, getMAGReadings, getIMUReadings, type SensorDataset, type IMUData, type MAGData } from './csvParser';
 import { OrientationViewer } from './viewer';
 import { calculateHardIronCalibration, evaluateCalibrationQuality, type MagCalibrationResult } from './magCalibration';
 import { calculateIMUCalibration, analyzeIMUData, type IMUCalibrationResult } from './imuCalibration';
+import { debug } from './constants';
 
 // Application state
 let viewer: OrientationViewer | null = null;
@@ -167,7 +169,7 @@ function init(): void {
     }
   });
   
-  console.log('FlySight Fusion Viewer initialized');
+  debug.log('FlySight Fusion Viewer initialized');
 }
 
 /**
@@ -231,11 +233,11 @@ async function handleFileSelect(event: Event): Promise<void> {
     const content = await file.text();
     dataset = parseCSV(content);
     
-    console.log(`Loaded ${dataset.readings.length} sensor readings`);
-    console.log(`Firmware: ${dataset.firmwareVersion}`);
-    console.log(`Duration: ${dataset.duration.toFixed(2)}s`);
-    console.log(`IMU: ${dataset.imuCount} samples @ ${dataset.imuRate} Hz`);
-    console.log(`MAG: ${dataset.magCount} samples @ ${dataset.magRate} Hz`);
+    debug.log(`Loaded ${dataset.readings.length} sensor readings`);
+    debug.log(`Firmware: ${dataset.firmwareVersion}`);
+    debug.log(`Duration: ${dataset.duration.toFixed(2)}s`);
+    debug.log(`IMU: ${dataset.imuCount} samples @ ${dataset.imuRate} Hz`);
+    debug.log(`MAG: ${dataset.magCount} samples @ ${dataset.magRate} Hz`);
     
     // Update stats display
     elements.imuCount.textContent = dataset.imuCount.toString();
@@ -264,7 +266,7 @@ async function handleFileSelect(event: Event): Promise<void> {
     resetPlayback();
     
   } catch (error) {
-    console.error('Error loading CSV:', error);
+    debug.error('Error loading CSV:', error);
     elements.fileName.textContent = 'Error loading file';
   }
 }
@@ -314,11 +316,11 @@ function computeFusionFrames(): void {
         const mz = (initMag.z - magCal.offsetZ) * magCal.scaleZ;
         
         ahrs.initFromAccelMag(ax, ay, az, mx, my, mz);
-        console.log('Initialized from first accel+mag sample');
+        debug.log('Initialized from first accel+mag sample');
       } else {
         // 6-DOF init from accel only - sets level but heading = 0
         ahrs.initFromAccelOnly(ax, ay, az);
-        console.log('Initialized from first accel sample (6-DOF)');
+        debug.log('Initialized from first accel sample (6-DOF)');
       }
     }
   }
@@ -365,7 +367,7 @@ function computeFusionFrames(): void {
     }
   }
   
-  console.log(`Computed ${fusionFrames.length} fusion frames`);
+  debug.log(`Computed ${fusionFrames.length} fusion frames`);
 }
 
 /**
@@ -556,8 +558,8 @@ function handleAxisRemapChange(): void {
     updateDisplay(playbackIndex);
   }
   
-  console.log('IMU axis remap:', imuRemap);
-  console.log('MAG axis remap:', magRemap);
+  debug.log('IMU axis remap:', imuRemap);
+  debug.log('MAG axis remap:', magRemap);
 }
 
 /**
@@ -678,8 +680,8 @@ function handleCalculateCalibration(): void {
   elements.calibrationResult.innerHTML = html;
   elements.calibrationResult.classList.add('visible');
   
-  console.log('Calibration calculated:', lastCalibrationResult);
-  console.log('Quality:', quality);
+  debug.log('Calibration calculated:', lastCalibrationResult);
+  debug.log('Quality:', quality);
 }
 
 /**
@@ -781,7 +783,7 @@ function handleCalculateIMUCalibration(): void {
   elements.imuCalibrationResult.innerHTML = html;
   elements.imuCalibrationResult.classList.add('visible');
   
-  console.log('IMU Calibration calculated:', lastIMUCalibrationResult);
+  debug.log('IMU Calibration calculated:', lastIMUCalibrationResult);
 }
 
 /**
@@ -850,7 +852,7 @@ function handleAnalyzeIMU(): void {
   elements.imuCalibrationResult.innerHTML = html;
   elements.imuCalibrationResult.classList.add('visible');
   
-  console.log('IMU Analysis:', analysis);
+  debug.log('IMU Analysis:', analysis);
 }
 
 // Initialize on page load

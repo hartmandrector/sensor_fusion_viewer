@@ -6,8 +6,9 @@
  */
 
 import * as THREE from 'three';
-import type { Quaternion } from './fusion';
+import type { Quaternion } from './types';
 import type { MAGData } from './csvParser';
+import { COLORS, DEVICE_DIMENSIONS, SCREEN_INSET, SCREEN_DEPTH_OFFSET } from './constants';
 
 export class OrientationViewer {
   private container: HTMLElement;
@@ -35,7 +36,7 @@ export class OrientationViewer {
     
     // Initialize Three.js
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a1a2e);
+    this.scene.background = new THREE.Color(COLORS.SCENE_BACKGROUND);
     
     // Camera setup
     const aspect = container.clientWidth / container.clientHeight;
@@ -78,10 +79,14 @@ export class OrientationViewer {
    */
   private createDevice(): void {
     // Main body - rectangular prism representing FlySight
-    // Dimensions: Width (X) = 0.6, Height (Y) = 1.2, Depth (Z) = 0.3
-    const bodyGeometry = new THREE.BoxGeometry(0.6, 1.2, 0.3);
+    // Real dimensions: 5cm x 5cm x 1.5cm (W x H x D), scaled for visualization
+    const bodyGeometry = new THREE.BoxGeometry(
+      DEVICE_DIMENSIONS.WIDTH,
+      DEVICE_DIMENSIONS.HEIGHT,
+      DEVICE_DIMENSIONS.DEPTH
+    );
     const bodyMaterial = new THREE.MeshPhongMaterial({ 
-      color: 0x2a2a4a,
+      color: COLORS.DEVICE_BODY,
       specular: 0x444444,
       shininess: 30
     });
@@ -92,24 +97,26 @@ export class OrientationViewer {
     const ledGeometry = new THREE.SphereGeometry(0.05, 16, 16);
     const ledMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
     const led = new THREE.Mesh(ledGeometry, ledMaterial);
-    led.position.set(0, 0.55, -0.16);  // Front is now -Z
+    led.position.set(0, DEVICE_DIMENSIONS.HEIGHT / 2 - 0.05, -DEVICE_DIMENSIONS.DEPTH / 2 - 0.01);
     this.deviceGroup.add(led);
     
     // USB port indicator (bottom, toward back which is at +Z)
     const usbGeometry = new THREE.BoxGeometry(0.15, 0.05, 0.1);
     const usbMaterial = new THREE.MeshPhongMaterial({ color: 0x444444 });
     const usb = new THREE.Mesh(usbGeometry, usbMaterial);
-    usb.position.set(0, -0.6, 0.1);  // Back is +Z
+    usb.position.set(0, -DEVICE_DIMENSIONS.HEIGHT / 2, DEVICE_DIMENSIONS.DEPTH / 2 - 0.05);
     this.deviceGroup.add(usb);
     
     // Front face indicator (screen area) - on -Z face
-    const screenGeometry = new THREE.PlaneGeometry(0.4, 0.6);
+    const screenWidth = DEVICE_DIMENSIONS.WIDTH - SCREEN_INSET * 2;
+    const screenHeight = DEVICE_DIMENSIONS.HEIGHT - SCREEN_INSET * 2;
+    const screenGeometry = new THREE.PlaneGeometry(screenWidth, screenHeight);
     const screenMaterial = new THREE.MeshPhongMaterial({ 
-      color: 0x111111,
+      color: COLORS.DEVICE_SCREEN,
       side: THREE.FrontSide
     });
     const screen = new THREE.Mesh(screenGeometry, screenMaterial);
-    screen.position.set(0, 0, -0.151);  // Front face at -Z
+    screen.position.set(0, 0, -DEVICE_DIMENSIONS.DEPTH / 2 - SCREEN_DEPTH_OFFSET);
     screen.rotation.y = Math.PI;  // Rotate to face -Z direction
     this.deviceGroup.add(screen);
     
@@ -128,24 +135,24 @@ export class OrientationViewer {
     const axisLength = 1.0;
     
     // Device X axis (red) - maps to Three.js -X (left/West)
-    const xAxis = this.createArrow(0xff0000, axisLength);
+    const xAxis = this.createArrow(COLORS.AXIS_X, axisLength);
     xAxis.rotation.z = Math.PI / 2;  // Rotate from +Y to -X (left)
     this.deviceGroup.add(xAxis);
     
-    // Device Y axis (yellow) - maps to Three.js +Y (up)
-    const yAxis = this.createArrow(0xffff00, axisLength);
+    // Device Y axis (green) - maps to Three.js +Y (up)
+    const yAxis = this.createArrow(COLORS.AXIS_Y, axisLength);
     // No rotation - default arrow points +Y which is up
     this.deviceGroup.add(yAxis);
     
     // Device Z axis (blue) - maps to Three.js -Z (forward, into screen)
-    const zAxis = this.createArrow(0x0088ff, axisLength);
+    const zAxis = this.createArrow(COLORS.AXIS_Z, axisLength);
     zAxis.rotation.x = -Math.PI / 2;  // Rotate from +Y to -Z (forward into screen)
     this.deviceGroup.add(zAxis);
     
     // Axis labels positioned in Three.js local frame
-    this.addAxisLabel('X', new THREE.Vector3(-(axisLength + 0.15), 0, 0), 0xff0000);
-    this.addAxisLabel('Y', new THREE.Vector3(0, axisLength + 0.15, 0), 0xffff00);
-    this.addAxisLabel('Z', new THREE.Vector3(0, 0, -(axisLength + 0.15)), 0x0088ff);
+    this.addAxisLabel('X', new THREE.Vector3(-(axisLength + 0.15), 0, 0), COLORS.AXIS_X);
+    this.addAxisLabel('Y', new THREE.Vector3(0, axisLength + 0.15, 0), COLORS.AXIS_Y);
+    this.addAxisLabel('Z', new THREE.Vector3(0, 0, -(axisLength + 0.15)), COLORS.AXIS_Z);
   }
   
   /**
@@ -334,68 +341,16 @@ export class OrientationViewer {
    * - NWU_Z (Up) should become Three.js +Y
    */
   setOrientation(q: Quaternion): void {
-    // Create the NWU quaternion
-    const qNWU = new THREE.Quaternion(q.x, q.y, q.z, q.w);
-    
-    // Rotation to transform from NWU to Three.js coordinates
-    // This is a fixed rotation that maps:
-    //   NWU_X (North) -> Three.js -Z
-    //   NWU_Y (West) -> Three.js -X  
-    //   NWU_Z (Up) -> Three.js +Y
+    // Transform quaternion from NWU frame to Three.js frame
     //
-    // This is equivalent to: rotate -90° around Y, then -90° around X
-    // Or we can compute it directly from axis mapping.
-    //
-    // The rotation matrix for this transform is:
-    //   [ 0, -1,  0 ]   X_three = -NWU_Y
-    //   [ 0,  0,  1 ]   Y_three = NWU_Z
-    //   [-1,  0,  0 ]   Z_three = -NWU_X
-    //
-    // Converting to quaternion: this is a 90° rotation around (1,0,1)/sqrt(2) axis
-    // Actually let's just compute it step by step:
-    // Step 1: Rotate 90° CCW around Y (looking down Y): X->-Z, Z->X
-    // Step 2: Rotate 90° CCW around X (looking down X): Y->Z, Z->-Y
-    //
-    // Combined: X -> -Z -> -(-Y) = Y... hmm that's not right.
-    //
-    // Let me just compute the quaternion for the axis mapping directly.
-    // We want the rotation that takes NWU basis to Three.js basis.
-    
-    // Actually, the simplest approach: apply the inverse mapping
-    // If v_three = R * v_nwu, then for quaternions:
-    // q_three = q_coordChange * q_nwu * q_coordChange^-1 (conjugation)
-    //
-    // For our mapping, q_coordChange rotates NWU frame to Three.js frame.
-    // NWU: X=N, Y=W, Z=U -> Three.js: -Z=N, -X=W, Y=U
-    // This is: first rotate 90° around Z (NWU), then 90° around X (in new frame)
-    //
-    // Let's just use a simpler empirical approach:
-    // Apply quaternion with axes swapped to match Three.js conventions
-    
-    // The model in Three.js has:
-    // - Device front (body Z = North) pointing in Three.js -Z direction
-    // - Device up (body Y = Up) pointing in Three.js +Y direction
-    // - Device left (body X = West) pointing in Three.js -X direction
-    //
-    // The NWU quaternion rotates NWU axes. We need to apply this rotation
-    // but with the axes interpreted in Three.js space.
-    //
-    // NWU X rotation (around North) -> Three.js -Z rotation
-    // NWU Y rotation (around West) -> Three.js -X rotation  
-    // NWU Z rotation (around Up) -> Three.js +Y rotation
-    
-    const qx_three = -q.z;  // NWU X (North) rotation -> -Z rotation in Three.js (negated)
-    const qy_three = q.x;   // NWU Z (Up) rotation -> Y rotation in Three.js... wait
-    
-    // Actually let me think about this differently.
-    // The quaternion components qx, qy, qz represent rotation around X, Y, Z axes.
-    // 
+    // Quaternion component mapping for coordinate frame change:
     // In NWU: qx = rotation around North, qy = rotation around West, qz = rotation around Up
-    // In Three.js we want: rotation around -Z (North), -X (West), Y (Up)
+    // In Three.js: X = East, Y = Up, Z = South
     //
-    // So: NWU qx (North rot) -> Three.js qz with negation (since North = -Z)
-    //     NWU qy (West rot) -> Three.js qx with negation (since West = -X)
-    //     NWU qz (Up rot) -> Three.js qy (since Up = Y)
+    // Mapping:
+    //   NWU qx (North rot) -> Three.js -qz (North = -Z)
+    //   NWU qy (West rot) -> Three.js -qx (West = -X)
+    //   NWU qz (Up rot) -> Three.js qy (Up = Y)
     
     this.deviceGroup.quaternion.set(-q.y, q.z, -q.x, q.w);
   }

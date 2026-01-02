@@ -10,28 +10,22 @@
  * Reference: https://x-io.co.uk/open-source-imu-and-ahrs-algorithms/
  */
 
+import { debug, DEFAULT_AXIS_REMAP, MIN_VECTOR_MAGNITUDE } from './constants';
+import type {
+  Quaternion,
+  EulerAngles,
+  MagCalibration,
+  IMUCalibration,
+  AxisRemap,
+  FusionConfig
+} from './types';
+
+// Re-export types for backward compatibility
+export type { Quaternion, EulerAngles, MagCalibration, IMUCalibration, AxisRemap, FusionConfig };
+
 // Constants
 const DEG_TO_RAD = Math.PI / 180.0;
 const RAD_TO_DEG = 180.0 / Math.PI;
-
-/**
- * Quaternion representation [w, x, y, z]
- */
-export interface Quaternion {
-  w: number;
-  x: number;
-  y: number;
-  z: number;
-}
-
-/**
- * Euler angles in radians
- */
-export interface EulerAngles {
-  roll: number;   // Rotation around X axis
-  pitch: number;  // Rotation around Y axis
-  yaw: number;    // Rotation around Z axis (heading)
-}
 
 /**
  * Fusion output structure
@@ -40,57 +34,6 @@ export interface FusionOutput {
   quaternion: Quaternion;
   euler: EulerAngles;
   heading: number;  // Magnetic heading in degrees (0-360)
-}
-
-/**
- * Magnetometer calibration parameters
- */
-export interface MagCalibration {
-  offsetX: number;
-  offsetY: number;
-  offsetZ: number;
-  scaleX: number;
-  scaleY: number;
-  scaleZ: number;
-}
-
-/**
- * IMU (Gyro + Accel) calibration parameters
- */
-export interface IMUCalibration {
-  // Gyroscope bias (deg/s) - subtracted from raw readings
-  gyroBiasX: number;
-  gyroBiasY: number;
-  gyroBiasZ: number;
-  // Accelerometer offset (g) - subtracted from raw readings
-  accelOffsetX: number;
-  accelOffsetY: number;
-  accelOffsetZ: number;
-}
-
-/**
- * Axis remapping configuration
- * Maps sensor axes to body frame axes
- * 
- * For each body axis, specify which sensor axis it corresponds to:
- * e.g., bodyX: '+Y' means body X = sensor +Y
- *       bodyX: '-Z' means body X = sensor -Z (negated)
- */
-export interface AxisRemap {
-  bodyX: '+X' | '-X' | '+Y' | '-Y' | '+Z' | '-Z';
-  bodyY: '+X' | '-X' | '+Y' | '-Y' | '+Z' | '-Z';
-  bodyZ: '+X' | '-X' | '+Y' | '-Y' | '+Z' | '-Z';
-}
-
-/**
- * Fusion configuration
- */
-export interface FusionConfig {
-  beta: number;              // Madgwick filter gain (0.01 - 0.5)
-  magCalibration: MagCalibration;
-  imuCalibration?: IMUCalibration;  // Optional IMU calibration
-  imuAxisRemap?: AxisRemap;   // Optional IMU axis remapping
-  magAxisRemap?: AxisRemap;   // Optional MAG axis remapping
 }
 
 /**
@@ -113,11 +56,6 @@ export class MadgwickAHRS {
   private lastMagZ: number = 0;
   private magValid: boolean = false;
   
-  // Default axis mapping (identity - no remap)
-  private static readonly DEFAULT_AXIS_REMAP: AxisRemap = {
-    bodyX: '+X', bodyY: '+Y', bodyZ: '+Z'
-  };
-  
   constructor(config?: Partial<FusionConfig>) {
     // Initialize to identity quaternion (no rotation)
     this.q = { w: 1, x: 0, y: 0, z: 0 };
@@ -132,8 +70,8 @@ export class MadgwickAHRS {
       gyroBiasX: 0, gyroBiasY: 0, gyroBiasZ: 0,
       accelOffsetX: 0, accelOffsetY: 0, accelOffsetZ: 0
     };
-    this.imuAxisRemap = config?.imuAxisRemap ?? MadgwickAHRS.DEFAULT_AXIS_REMAP;
-    this.magAxisRemap = config?.magAxisRemap ?? MadgwickAHRS.DEFAULT_AXIS_REMAP;
+    this.imuAxisRemap = config?.imuAxisRemap ?? DEFAULT_AXIS_REMAP;
+    this.magAxisRemap = config?.magAxisRemap ?? DEFAULT_AXIS_REMAP;
   }
   
   /**
@@ -160,28 +98,28 @@ export class MadgwickAHRS {
    */
   initFromAccelMag(ax: number, ay: number, az: number,
                    mx: number, my: number, mz: number): void {
-    console.log(`initFromAccelMag input (raw): accel=[${ax.toFixed(3)}, ${ay.toFixed(3)}, ${az.toFixed(3)}], mag=[${mx.toFixed(3)}, ${my.toFixed(3)}, ${mz.toFixed(3)}]`);
+    debug.log(`initFromAccelMag input (raw): accel=[${ax.toFixed(3)}, ${ay.toFixed(3)}, ${az.toFixed(3)}], mag=[${mx.toFixed(3)}, ${my.toFixed(3)}, ${mz.toFixed(3)}]`);
     
     // Apply axis remapping to get body frame values
     const accelBody = this.applyAxisRemap(ax, ay, az, this.imuAxisRemap);
     const magBody = this.applyAxisRemap(mx, my, mz, this.magAxisRemap);
     
-    console.log(`After axis remap (body): accel=[${accelBody.x.toFixed(3)}, ${accelBody.y.toFixed(3)}, ${accelBody.z.toFixed(3)}], mag=[${magBody.x.toFixed(3)}, ${magBody.y.toFixed(3)}, ${magBody.z.toFixed(3)}]`);
+    debug.log(`After axis remap (body): accel=[${accelBody.x.toFixed(3)}, ${accelBody.y.toFixed(3)}, ${accelBody.z.toFixed(3)}], mag=[${magBody.x.toFixed(3)}, ${magBody.y.toFixed(3)}, ${magBody.z.toFixed(3)}]`);
     
     // Transform to NWU frame for computation
     // Body: X=West, Y=Up, Z=North -> NWU: X=North, Y=West, Z=Up
     const accelNWU = this.bodyToNWU(accelBody.x, accelBody.y, accelBody.z);
     const magNWU = this.bodyToNWU(magBody.x, magBody.y, magBody.z);
     
-    console.log(`In NWU frame: accel=[${accelNWU.x.toFixed(3)}, ${accelNWU.y.toFixed(3)}, ${accelNWU.z.toFixed(3)}], mag=[${magNWU.x.toFixed(3)}, ${magNWU.y.toFixed(3)}, ${magNWU.z.toFixed(3)}]`);
+    debug.log(`In NWU frame: accel=[${accelNWU.x.toFixed(3)}, ${accelNWU.y.toFixed(3)}, ${accelNWU.z.toFixed(3)}], mag=[${magNWU.x.toFixed(3)}, ${magNWU.y.toFixed(3)}, ${magNWU.z.toFixed(3)}]`);
     
     ax = accelNWU.x; ay = accelNWU.y; az = accelNWU.z;
     mx = magNWU.x; my = magNWU.y; mz = magNWU.z;
     
     // Normalize accelerometer (gravity direction)
     const aNorm = Math.sqrt(ax*ax + ay*ay + az*az);
-    if (aNorm < 0.01) {
-      console.warn('Accel magnitude too small for initialization');
+    if (aNorm < MIN_VECTOR_MAGNITUDE) {
+      debug.warn('Accel magnitude too small for initialization');
       return;
     }
     ax /= aNorm;
@@ -190,8 +128,8 @@ export class MadgwickAHRS {
     
     // Normalize magnetometer
     const mNorm = Math.sqrt(mx*mx + my*my + mz*mz);
-    if (mNorm < 0.01) {
-      console.warn('Mag magnitude too small for initialization');
+    if (mNorm < MIN_VECTOR_MAGNITUDE) {
+      debug.warn('Mag magnitude too small for initialization');
       return;
     }
     mx /= mNorm;
@@ -226,8 +164,8 @@ export class MadgwickAHRS {
     
     // Normalize horizontal north
     const nNorm = Math.sqrt(northX*northX + northY*northY + northZ*northZ);
-    if (nNorm < 0.01) {
-      console.warn('Horizontal mag component too small');
+    if (nNorm < MIN_VECTOR_MAGNITUDE) {
+      debug.warn('Horizontal mag component too small');
       return;
     }
     northX /= nNorm;
@@ -239,10 +177,10 @@ export class MadgwickAHRS {
     const westY = upZ * northX - upX * northZ;
     const westZ = upX * northY - upY * northX;
     
-    console.log(`NWU sensor frame axes (at current orientation):`);
-    console.log(`  Up (sensor):    [${upX.toFixed(3)}, ${upY.toFixed(3)}, ${upZ.toFixed(3)}]`);
-    console.log(`  North (sensor): [${northX.toFixed(3)}, ${northY.toFixed(3)}, ${northZ.toFixed(3)}]`);
-    console.log(`  West (sensor):  [${westX.toFixed(3)}, ${westY.toFixed(3)}, ${westZ.toFixed(3)}]`);
+    debug.log(`NWU sensor frame axes (at current orientation):`);
+    debug.log(`  Up (sensor):    [${upX.toFixed(3)}, ${upY.toFixed(3)}, ${upZ.toFixed(3)}]`);
+    debug.log(`  North (sensor): [${northX.toFixed(3)}, ${northY.toFixed(3)}, ${northZ.toFixed(3)}]`);
+    debug.log(`  West (sensor):  [${westX.toFixed(3)}, ${westY.toFixed(3)}, ${westZ.toFixed(3)}]`);
     
     // Step 4: Build rotation matrix
     // 
@@ -265,10 +203,10 @@ export class MadgwickAHRS {
     const r10 = westX,   r11 = westY,   r12 = westZ;   // row 1 = west
     const r20 = upX,     r21 = upY,     r22 = upZ;     // row 2 = up
     
-    console.log(`Rotation matrix R_sensor_to_world (rows = world axes in sensor):`);
-    console.log(`  [${r00.toFixed(3)}, ${r01.toFixed(3)}, ${r02.toFixed(3)}]`);
-    console.log(`  [${r10.toFixed(3)}, ${r11.toFixed(3)}, ${r12.toFixed(3)}]`);
-    console.log(`  [${r20.toFixed(3)}, ${r21.toFixed(3)}, ${r22.toFixed(3)}]`);
+    debug.log(`Rotation matrix R_sensor_to_world (rows = world axes in sensor):`);
+    debug.log(`  [${r00.toFixed(3)}, ${r01.toFixed(3)}, ${r02.toFixed(3)}]`);
+    debug.log(`  [${r10.toFixed(3)}, ${r11.toFixed(3)}, ${r12.toFixed(3)}]`);
+    debug.log(`  [${r20.toFixed(3)}, ${r21.toFixed(3)}, ${r22.toFixed(3)}]`);
     
     // Step 5: Convert rotation matrix to quaternion (Shepperd's method)
     const trace = r00 + r11 + r22;
@@ -309,14 +247,14 @@ export class MadgwickAHRS {
       z: qz / qNorm
     };
     
-    console.log(`Initialized orientation (NWU frame): q=[${this.q.w.toFixed(3)}, ${this.q.x.toFixed(3)}, ${this.q.y.toFixed(3)}, ${this.q.z.toFixed(3)}]`);
+    debug.log(`Initialized orientation (NWU frame): q=[${this.q.w.toFixed(3)}, ${this.q.x.toFixed(3)}, ${this.q.y.toFixed(3)}, ${this.q.z.toFixed(3)}]`);
     
     // Debug: compute Euler angles to verify
     const euler = this.getEulerAngles();
     const headingDeg = euler.yaw * 180 / Math.PI;
     const pitchDeg = euler.pitch * 180 / Math.PI;
     const rollDeg = euler.roll * 180 / Math.PI;
-    console.log(`  -> Heading: ${headingDeg.toFixed(1)}°, Pitch: ${pitchDeg.toFixed(1)}°, Roll: ${rollDeg.toFixed(1)}°`);
+    debug.log(`  -> Heading: ${headingDeg.toFixed(1)}°, Pitch: ${pitchDeg.toFixed(1)}°, Roll: ${rollDeg.toFixed(1)}°`);
   }
   
   /**
@@ -340,8 +278,8 @@ export class MadgwickAHRS {
     
     // Normalize accelerometer (gravity direction)
     const aNorm = Math.sqrt(ax*ax + ay*ay + az*az);
-    if (aNorm < 0.01) {
-      console.warn('Accel magnitude too small for initialization');
+    if (aNorm < MIN_VECTOR_MAGNITUDE) {
+      debug.warn('Accel magnitude too small for initialization');
       return;
     }
     ax /= aNorm;
@@ -374,7 +312,7 @@ export class MadgwickAHRS {
       z: cr * cp * sy - sr * sp * cy
     };
     
-    console.log(`Initialized orientation from accel only (6-DOF, NWU): q=[${this.q.w.toFixed(3)}, ${this.q.x.toFixed(3)}, ${this.q.y.toFixed(3)}, ${this.q.z.toFixed(3)}]`);
+    debug.log(`Initialized orientation from accel only (6-DOF, NWU): q=[${this.q.w.toFixed(3)}, ${this.q.x.toFixed(3)}, ${this.q.y.toFixed(3)}, ${this.q.z.toFixed(3)}]`);
   }
   
   /**
@@ -509,55 +447,6 @@ export class MadgwickAHRS {
   
   /**
    * Transform from Madgwick NWU frame to FlySight body frame
-   * 
-   * Inverse of bodyToNWU:
-   * Body_X = NWU_Y, Body_Y = NWU_Z, Body_Z = NWU_X
-   */
-  private nwuToBody(x: number, y: number, z: number): { x: number; y: number; z: number } {
-    return { x: y, y: z, z: x };
-  }
-  
-  /**
-   * Transform quaternion from Madgwick NWU frame to FlySight body frame
-   * 
-   * The rotation R_nwu that transforms NWU coordinates can be converted to
-   * R_body using the coordinate change matrix C where Body = C * NWU:
-   * 
-   * C = [0 1 0]  (Body_X = NWU_Y)
-   *     [0 0 1]  (Body_Y = NWU_Z)
-   *     [1 0 0]  (Body_Z = NWU_X)
-   * 
-   * For quaternions, this corresponds to cycling the imaginary components.
-   */
-  private quaternionNWUtoBody(q: Quaternion): Quaternion {
-    // The coordinate change from NWU to Body is a cyclic permutation
-    // For quaternion [w, x, y, z], the imaginary parts cycle as the axes do
-    // NWU: [w, qx_nwu, qy_nwu, qz_nwu]
-    // Body: qx_body corresponds to Body_X which is NWU_Y, so qx_body = qy_nwu
-    //       qy_body corresponds to Body_Y which is NWU_Z, so qy_body = qz_nwu
-    //       qz_body corresponds to Body_Z which is NWU_X, so qz_body = qx_nwu
-    return {
-      w: q.w,
-      x: q.y,  // Body_X = NWU_Y
-      y: q.z,  // Body_Y = NWU_Z
-      z: q.x   // Body_Z = NWU_X
-    };
-  }
-  
-  /**
-   * Transform quaternion from FlySight body frame to Madgwick NWU frame
-   */
-  private quaternionBodyToNWU(q: Quaternion): Quaternion {
-    // Inverse of quaternionNWUtoBody
-    // NWU_X = Body_Z, NWU_Y = Body_X, NWU_Z = Body_Y
-    return {
-      w: q.w,
-      x: q.z,  // NWU_X = Body_Z
-      y: q.x,  // NWU_Y = Body_X
-      z: q.y   // NWU_Z = Body_Y
-    };
-  }
-  
   /**
    * Update with IMU data (gyro + accel)
    * Called at ~400 Hz for each IMU sample
