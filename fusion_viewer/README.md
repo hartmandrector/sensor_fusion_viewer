@@ -22,6 +22,38 @@ npm run dev
 
 Then open http://localhost:3000 in your browser.
 
+## FlySight 2 Configuration
+
+### Required Firmware Version
+
+This viewer requires **FlySight firmware v2024.12.30**. 
+
+> ⚠️ **Note**: Some more recent firmware versions did not work correctly for high-speed data logging. This specific version (v2024.12.30) is the only one confirmed to have the features needed to enable high-speed sensor data logging.
+
+### Sensor ODR Settings
+
+Add the following to your FlySight `CONFIG.TXT` to enable high-speed data logging:
+
+```ini
+; Magnetometer - 100 Hz
+; Values: 0=10Hz, 1=20Hz, 2=50Hz, 3=100Hz
+Mag_ODR: 3
+
+; Accelerometer - 416 Hz
+; Values: 0=off, 1=12.5Hz, 2=26Hz, 3=52Hz, 4=104Hz,
+; 5=208Hz, 6=416Hz, 7=833Hz, 8=1666Hz, 9=3333Hz, 10=6666Hz, 11=1.6Hz
+Accel_ODR: 6
+
+; Gyroscope - 416 Hz (matches accel for sync)
+; Values: 0=off, 1=12.5Hz, 2=26Hz, 3=52Hz, 4=104Hz,
+; 5=208Hz, 6=416Hz, 7=833Hz, 8=1666Hz, 9=3333Hz, 10=6666Hz
+Gyro_ODR: 6
+```
+
+These settings provide:
+- **IMU (Accel + Gyro)**: 416 Hz synchronized sampling
+- **Magnetometer**: 100 Hz sampling
+
 ## Usage
 
 1. Click "Load Sensor CSV" and select a FlySight 2 SENSOR.CSV file

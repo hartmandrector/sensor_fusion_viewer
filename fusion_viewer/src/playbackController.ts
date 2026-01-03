@@ -257,13 +257,25 @@ export function updateDisplay(frameIndex: number): void {
   // Update sensor vectors if enabled
   if (elements.showSensorVectors.checked && frame.imu && ahrs) {
     const imuCal = ahrs.getIMUCalibration();
+    
+    // Accelerometer (calibrated and remapped)
     const rawAccel = {
       x: frame.imu.ax - imuCal.accelOffsetX,
       y: frame.imu.ay - imuCal.accelOffsetY,
       z: frame.imu.az - imuCal.accelOffsetZ
     };
     const accel = ahrs.applyIMURemap(rawAccel.x, rawAccel.y, rawAccel.z);
-    viewer.updateSensorVectors(accel, frame.calibratedMag || null);
+    
+    // Gyroscope (calibrated and remapped) - values are in deg/s, convert to rad/s
+    const DEG_TO_RAD = Math.PI / 180;
+    const rawGyro = {
+      x: (frame.imu.wx - imuCal.gyroBiasX) * DEG_TO_RAD,
+      y: (frame.imu.wy - imuCal.gyroBiasY) * DEG_TO_RAD,
+      z: (frame.imu.wz - imuCal.gyroBiasZ) * DEG_TO_RAD
+    };
+    const gyro = ahrs.applyIMURemap(rawGyro.x, rawGyro.y, rawGyro.z);
+    
+    viewer.updateSensorVectors(accel, frame.calibratedMag || null, gyro);
   }
   
   // Update orientation display

@@ -72,7 +72,11 @@ export const COLORS = {
   // Sensor vector colors
   ACCEL_VECTOR: 0xffff00,  // Yellow
   MAG_VECTOR: 0xff00ff,    // Magenta
-  GYRO_VECTOR: 0x00ffff,   // Cyan
+  
+  // Gyro rotation arrows (curved) - RGB matches rotation axis
+  GYRO_X: 0xff6666,        // Light Red - rotation around X
+  GYRO_Y: 0x66ff66,        // Light Green - rotation around Y
+  GYRO_Z: 0x6666ff,        // Light Blue - rotation around Z
   
   // World reference colors
   WORLD_NORTH: 0x4444ff,   // Blue (matches Z)

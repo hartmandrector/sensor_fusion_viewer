@@ -10,6 +10,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { Quaternion } from './types';
 import type { MAGData } from './csvParser';
 import { COLORS, DEVICE_DIMENSIONS, SCREEN_INSET, SCREEN_DEPTH_OFFSET } from './constants';
+import { createCurvedArrow, disposeCurvedArrow } from './curvedArrow';
 
 export class OrientationViewer {
   private container: HTMLElement;
@@ -25,9 +26,17 @@ export class OrientationViewer {
   // Sensor vector visualization
   private sensorVectorsGroup: THREE.Group;
   private accelArrow: THREE.ArrowHelper | null = null;
+  private accelLabel: THREE.Sprite | null = null;
   private magArrow: THREE.ArrowHelper | null = null;
+  private magLabel: THREE.Sprite | null = null;
   private magWorldArrow: THREE.ArrowHelper | null = null;  // Mag in world frame
+  private magWorldLabel: THREE.Sprite | null = null;
   private showSensorVectors: boolean = false;
+  
+  // Gyro rotation arrows (curved)
+  private gyroArrowX: THREE.Group | null = null;
+  private gyroArrowY: THREE.Group | null = null;
+  private gyroArrowZ: THREE.Group | null = null;
   
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -541,10 +550,12 @@ export class OrientationViewer {
    * 
    * @param accel Accelerometer reading [x, y, z] in g
    * @param mag Magnetometer reading [x, y, z] in gauss (after calibration and remap)
+   * @param gyro Gyroscope reading [x, y, z] in rad/s (after calibration and remap)
    */
   updateSensorVectors(
     accel: { x: number; y: number; z: number },
-    mag: { x: number; y: number; z: number } | null
+    mag: { x: number; y: number; z: number } | null,
+    gyro: { x: number; y: number; z: number } | null = null
   ): void {
     if (!this.showSensorVectors) return;
     
@@ -553,14 +564,46 @@ export class OrientationViewer {
       this.sensorVectorsGroup.remove(this.accelArrow);
       this.accelArrow.dispose();
     }
+    if (this.accelLabel) {
+      this.sensorVectorsGroup.remove(this.accelLabel);
+      this.disposeLabel(this.accelLabel);
+      this.accelLabel = null;
+    }
     if (this.magArrow) {
       this.sensorVectorsGroup.remove(this.magArrow);
       this.magArrow.dispose();
+    }
+    if (this.magLabel) {
+      this.sensorVectorsGroup.remove(this.magLabel);
+      this.disposeLabel(this.magLabel);
+      this.magLabel = null;
     }
     if (this.magWorldArrow) {
       this.scene.remove(this.magWorldArrow);
       this.magWorldArrow.dispose();
       this.magWorldArrow = null;
+    }
+    if (this.magWorldLabel) {
+      this.scene.remove(this.magWorldLabel);
+      this.disposeLabel(this.magWorldLabel);
+      this.magWorldLabel = null;
+    }
+    
+    // Remove old gyro arrows
+    if (this.gyroArrowX) {
+      this.sensorVectorsGroup.remove(this.gyroArrowX);
+      disposeCurvedArrow(this.gyroArrowX);
+      this.gyroArrowX = null;
+    }
+    if (this.gyroArrowY) {
+      this.sensorVectorsGroup.remove(this.gyroArrowY);
+      disposeCurvedArrow(this.gyroArrowY);
+      this.gyroArrowY = null;
+    }
+    if (this.gyroArrowZ) {
+      this.sensorVectorsGroup.remove(this.gyroArrowZ);
+      disposeCurvedArrow(this.gyroArrowZ);
+      this.gyroArrowZ = null;
     }
     
     // Sensor readings are in device body frame:
@@ -576,30 +619,42 @@ export class OrientationViewer {
     const accelLocal = sensorToLocal(accel);
     const accelDir = accelLocal.clone().normalize();
     const accelLength = accelLocal.length();
+    const accelArrowLength = accelLength * 1.5;
     this.accelArrow = new THREE.ArrowHelper(
       accelDir,
       new THREE.Vector3(0, 0, 0),
-      accelLength * 1.5,  // Scale for visibility
+      accelArrowLength,  // Scale for visibility
       0xffff00,  // Yellow
       0.2,
       0.1
     );
     this.sensorVectorsGroup.add(this.accelArrow);
     
+    // Add "G" label at tip of gravity vector
+    this.accelLabel = this.createTextLabel('G', '#ffff00');
+    this.accelLabel.position.copy(accelDir.clone().multiplyScalar(accelArrowLength + 0.15));
+    this.sensorVectorsGroup.add(this.accelLabel);
+    
     // Magnetometer vector (magenta) - shows magnetic north in body frame (attached to device)
     if (mag) {
       const magLocal = sensorToLocal(mag);
       const magDir = magLocal.clone().normalize();
       const magLength = magLocal.length();
+      const magArrowLength = magLength * 3.0;
       this.magArrow = new THREE.ArrowHelper(
         magDir,
         new THREE.Vector3(0, 0, 0),
-        magLength * 3.0,  // Scale for visibility (mag values are smaller)
+        magArrowLength,  // Scale for visibility (mag values are smaller)
         0xff00ff,  // Magenta - body frame
         0.2,
         0.1
       );
       this.sensorVectorsGroup.add(this.magArrow);
+      
+      // Add "M" label at tip of mag vector (body frame)
+      this.magLabel = this.createTextLabel('M', '#ff00ff');
+      this.magLabel.position.copy(magDir.clone().multiplyScalar(magArrowLength + 0.15));
+      this.sensorVectorsGroup.add(this.magLabel);
       
       // Magnetometer vector in WORLD frame (cyan)
       // Transform body-frame mag to world frame using current device orientation
@@ -607,15 +662,50 @@ export class OrientationViewer {
       const magLocalVec = magLocal.clone();
       magLocalVec.applyQuaternion(this.deviceGroup.quaternion);
       const magWorldDir = magLocalVec.normalize();
+      const magWorldArrowLength = magLength * 3.0;
       this.magWorldArrow = new THREE.ArrowHelper(
         magWorldDir,
         new THREE.Vector3(0, 0, 0),
-        magLength * 3.0,
+        magWorldArrowLength,
         0x00ffff,  // Cyan - world frame
         0.2,
         0.1
       );
       this.scene.add(this.magWorldArrow);
+      
+      // Add "M" label at tip of mag vector (world frame) - smaller to differentiate
+      this.magWorldLabel = this.createTextLabel('M', '#00ffff');
+      this.magWorldLabel.position.copy(magWorldDir.clone().multiplyScalar(magWorldArrowLength + 0.15));
+      this.scene.add(this.magWorldLabel);
+    }
+    
+    // Gyroscope curved arrows - show angular velocity around each axis
+    // Gyro values are in rad/s, we scale by 0.5 for visibility
+    if (gyro) {
+      const gyroScale = 0.5;
+      
+      // Transform gyro to local Three.js frame: Device X → -X, Device Y → +Y, Device Z → -Z
+      const gxLocal = -gyro.x * gyroScale;
+      const gyLocal = gyro.y * gyroScale;
+      const gzLocal = -gyro.z * gyroScale;
+      
+      // X rotation (light red) - rotation around X axis
+      if (Math.abs(gxLocal) > 0.01) {
+        this.gyroArrowX = createCurvedArrow('x', gxLocal, COLORS.GYRO_X, { radius: 0.9 });
+        this.sensorVectorsGroup.add(this.gyroArrowX);
+      }
+      
+      // Y rotation (light green) - rotation around Y axis
+      if (Math.abs(gyLocal) > 0.01) {
+        this.gyroArrowY = createCurvedArrow('y', gyLocal, COLORS.GYRO_Y, { radius: 0.9 });
+        this.sensorVectorsGroup.add(this.gyroArrowY);
+      }
+      
+      // Z rotation (light blue) - rotation around Z axis
+      if (Math.abs(gzLocal) > 0.01) {
+        this.gyroArrowZ = createCurvedArrow('z', gzLocal, COLORS.GYRO_Z, { radius: 0.9 });
+        this.sensorVectorsGroup.add(this.gyroArrowZ);
+      }
     }
   }
   
@@ -628,5 +718,43 @@ export class OrientationViewer {
     }
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
+  }
+  
+  /**
+   * Create a text sprite label that always faces the camera
+   */
+  private createTextLabel(text: string, color: string): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const size = 64;
+    canvas.width = size;
+    canvas.height = size;
+    
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = color;
+    context.font = 'bold 48px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(text, size / 2, size / 2);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ 
+      map: texture,
+      transparent: true,
+      depthTest: false  // Always render on top
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(0.3, 0.3, 1);  // Adjust size
+    
+    return sprite;
+  }
+  
+  /**
+   * Dispose of a text label sprite
+   */
+  private disposeLabel(label: THREE.Sprite | null): void {
+    if (label) {
+      label.material.map?.dispose();
+      label.material.dispose();
+    }
   }
 }
