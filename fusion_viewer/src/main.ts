@@ -154,6 +154,7 @@ async function handleFileSelect(event: Event): Promise<void> {
     elements.magCount.textContent = state.dataset.magCount.toString();
     elements.duration.textContent = state.dataset.duration.toFixed(2);
     elements.imuRate.textContent = state.dataset.imuRate.toString();
+    elements.magRate.textContent = state.dataset.magRate.toString();
     elements.totalTime.textContent = state.dataset.duration.toFixed(3) + 's';
     
     // Pre-compute fusion frames
