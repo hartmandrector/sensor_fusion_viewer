@@ -6,6 +6,7 @@
  */
 
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { Quaternion } from './types';
 import type { MAGData } from './csvParser';
 import { COLORS, DEVICE_DIMENSIONS, SCREEN_INSET, SCREEN_DEPTH_OFFSET } from './constants';
@@ -15,6 +16,7 @@ export class OrientationViewer {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
+  private controls: OrbitControls;
   private deviceGroup: THREE.Group;
   private magPlotGroup: THREE.Group | null = null;
   private animationId: number | null = null;
@@ -49,6 +51,13 @@ export class OrientationViewer {
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(this.renderer.domElement);
+    
+    // OrbitControls for camera interaction
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
+    this.controls.minDistance = 2;
+    this.controls.maxDistance = 15;
     
     // Device group (will be rotated)
     this.deviceGroup = new THREE.Group();
@@ -380,12 +389,15 @@ export class OrientationViewer {
   private animate(): void {
     this.animationId = requestAnimationFrame(() => this.animate());
     
-    // Slowly rotate camera around the scene when showing mag plot
+    // Update orbit controls (required for damping)
+    this.controls.update();
+    
+    // Auto-rotate when showing mag plot
     if (this.showingMagPlot) {
-      const time = Date.now() * 0.0003;
-      this.camera.position.x = Math.cos(time) * 4;
-      this.camera.position.z = Math.sin(time) * 4;
-      this.camera.lookAt(0, 0, 0);
+      this.controls.autoRotate = true;
+      this.controls.autoRotateSpeed = 2.0;
+    } else {
+      this.controls.autoRotate = false;
     }
     
     this.renderer.render(this.scene, this.camera);
