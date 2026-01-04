@@ -351,6 +351,24 @@ export class MadgwickAHRS {
   }
   
   /**
+   * Set gyroscope bias
+   */
+  setGyroBias(x: number, y: number, z: number): void {
+    this.imuCal.gyroBiasX = x;
+    this.imuCal.gyroBiasY = y;
+    this.imuCal.gyroBiasZ = z;
+  }
+  
+  /**
+   * Set accelerometer offset
+   */
+  setAccelOffset(x: number, y: number, z: number): void {
+    this.imuCal.accelOffsetX = x;
+    this.imuCal.accelOffsetY = y;
+    this.imuCal.accelOffsetZ = z;
+  }
+  
+  /**
    * Set IMU axis remapping
    */
   setIMUAxisRemap(remap: AxisRemap): void {

@@ -327,8 +327,13 @@ export function handleAxisRemapChange(): void {
     bodyZ: elements.magRemapZ.value as AxisRemap['bodyZ']
   };
   
-  state.ahrs.setIMUAxisRemap(imuRemap);
-  state.ahrs.setMagAxisRemap(magRemap);
+  // Optional methods - check if they exist before calling
+  if (state.ahrs?.setIMUAxisRemap) {
+    state.ahrs.setIMUAxisRemap(imuRemap);
+  }
+  if (state.ahrs?.setMagAxisRemap) {
+    state.ahrs.setMagAxisRemap(magRemap);
+  }
   
   if (state.dataset) {
     computeFusionFrames();

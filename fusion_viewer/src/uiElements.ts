@@ -26,12 +26,35 @@ export interface UIElements {
   totalTime: HTMLSpanElement;
   speedSelect: HTMLSelectElement;
   
+  // Algorithm selection
+  algorithmSelect: HTMLSelectElement;
+  fusionSettings: HTMLDivElement;
+  
   // Filter parameters
   betaSlider: HTMLInputElement;
   betaValue: HTMLSpanElement;
   initFromSensors: HTMLInputElement;
   useMagnetometer: HTMLInputElement;
   showSensorVectors: HTMLInputElement;
+  
+  // Fusion Ch.7 specific
+  accelRejectSlider: HTMLInputElement;
+  accelRejectValue: HTMLSpanElement;
+  magRejectSlider: HTMLInputElement;
+  magRejectValue: HTMLSpanElement;
+  accelStatus: HTMLSpanElement;
+  accelError: HTMLSpanElement;
+  magStatus: HTMLSpanElement;
+  magError: HTMLSpanElement;
+  ahrsFlags: HTMLSpanElement;
+  // Runtime bias display
+  runtimeBiasX: HTMLSpanElement;
+  runtimeBiasY: HTMLSpanElement;
+  runtimeBiasZ: HTMLSpanElement;
+  biasCalStatus: HTMLSpanElement;
+  biasProgress: HTMLSpanElement;
+  gyroMagnitude: HTMLSpanElement;
+  stationaryThreshold: HTMLSpanElement;
   
   // Axis remapping
   imuRemapX: HTMLSelectElement;
@@ -126,12 +149,35 @@ export function initializeElements(): UIElements {
     totalTime: getElement<HTMLSpanElement>('totalTime'),
     speedSelect: getElement<HTMLSelectElement>('speedSelect'),
     
+    // Algorithm selection
+    algorithmSelect: getElement<HTMLSelectElement>('algorithmSelect'),
+    fusionSettings: getElement<HTMLDivElement>('fusionSettings'),
+    
     // Filter parameters
     betaSlider: getElement<HTMLInputElement>('betaSlider'),
     betaValue: getElement<HTMLSpanElement>('betaValue'),
     initFromSensors: getElement<HTMLInputElement>('initFromSensors'),
     useMagnetometer: getElement<HTMLInputElement>('useMagnetometer'),
     showSensorVectors: getElement<HTMLInputElement>('showSensorVectors'),
+    
+    // Fusion Ch.7 specific
+    accelRejectSlider: getElement<HTMLInputElement>('accelRejectSlider'),
+    accelRejectValue: getElement<HTMLSpanElement>('accelRejectValue'),
+    magRejectSlider: getElement<HTMLInputElement>('magRejectSlider'),
+    magRejectValue: getElement<HTMLSpanElement>('magRejectValue'),
+    accelStatus: getElement<HTMLSpanElement>('accelStatus'),
+    accelError: getElement<HTMLSpanElement>('accelError'),
+    magStatus: getElement<HTMLSpanElement>('magStatus'),
+    magError: getElement<HTMLSpanElement>('magError'),
+    ahrsFlags: getElement<HTMLSpanElement>('ahrsFlags'),
+    // Runtime bias display
+    runtimeBiasX: getElement<HTMLSpanElement>('runtimeBiasX'),
+    runtimeBiasY: getElement<HTMLSpanElement>('runtimeBiasY'),
+    runtimeBiasZ: getElement<HTMLSpanElement>('runtimeBiasZ'),
+    biasCalStatus: getElement<HTMLSpanElement>('biasCalStatus'),
+    biasProgress: getElement<HTMLSpanElement>('biasProgress'),
+    gyroMagnitude: getElement<HTMLSpanElement>('gyroMagnitude'),
+    stationaryThreshold: getElement<HTMLSpanElement>('stationaryThreshold'),
     
     // Axis remapping
     imuRemapX: getElement<HTMLSelectElement>('imuRemapX'),

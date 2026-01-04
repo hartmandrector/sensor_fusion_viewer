@@ -7,13 +7,70 @@
 
 import type { SensorDataset, IMUData, MAGData } from './csvParser';
 import type { MadgwickAHRS } from './fusion';
+import type { FusionAhrsAdapter } from './FusionAhrsAdapter';
 import type { OrientationViewer } from './viewer';
 import type { MagCalibrationResult } from './magCalibration';
 import type { IMUCalibrationResult } from './imuCalibration';
 
 // ============================================================================
+// Algorithm Type
+// ============================================================================
+
+export type AlgorithmType = 'madgwick' | 'fusion';
+
+// ============================================================================
+// AHRS Interface (common between algorithms)
+// ============================================================================
+
+/**
+ * Common AHRS interface that both algorithms implement
+ */
+export interface AHRSInterface {
+  reset(): void;
+  updateMag(mx: number, my: number, mz: number): void;
+  updateIMU(dt: number, wx: number, wy: number, wz: number, ax: number, ay: number, az: number): void;
+  initFromAccelMag(ax: number, ay: number, az: number, mx: number, my: number, mz: number): void;
+  initFromAccelOnly(ax: number, ay: number, az: number): void;
+  getOutput(): { quaternion: { w: number; x: number; y: number; z: number }; euler: { roll: number; pitch: number; yaw: number }; heading: number };
+  getCalibratedMag(): { x: number; y: number; z: number; valid: boolean };
+  getIMUCalibration(): { gyroBiasX: number; gyroBiasY: number; gyroBiasZ: number; accelOffsetX: number; accelOffsetY: number; accelOffsetZ: number };
+  getMagCalibration(): { offsetX: number; offsetY: number; offsetZ: number; scaleX: number; scaleY: number; scaleZ: number };
+  setIMUCalibration(cal: { gyroBiasX: number; gyroBiasY: number; gyroBiasZ: number; accelOffsetX: number; accelOffsetY: number; accelOffsetZ: number }): void;
+  setMagCalibration(cal: { offsetX: number; offsetY: number; offsetZ: number; scaleX: number; scaleY: number; scaleZ: number }): void;
+  setGyroBias(x: number, y: number, z: number): void;
+  setAccelOffset(x: number, y: number, z: number): void;
+  applyIMURemap(x: number, y: number, z: number): { x: number; y: number; z: number };
+  setIMUAxisRemap?(remap: import('./types').AxisRemap): void;
+  setMagAxisRemap?(remap: import('./types').AxisRemap): void;
+}
+
+// ============================================================================
 // Fusion Frame Type
 // ============================================================================
+
+/**
+ * Internal AHRS states for Fusion Ch.7
+ */
+export interface FusionInternalStates {
+  accelerationError: number;
+  accelerometerIgnored: boolean;
+  accelerationRecoveryTrigger: number;
+  magneticError: number;
+  magnetometerIgnored: boolean;
+  magneticRecoveryTrigger: number;
+}
+
+/**
+ * Runtime bias estimation state
+ */
+export interface BiasState {
+  bias: { x: number; y: number; z: number };  // degrees/s
+  isCalibrating: boolean;
+  progress: number;  // 0-1
+  stationaryTime: number;  // seconds
+  gyroMagnitude: number;  // degrees/s - current gyro magnitude
+  stationaryThreshold: number;  // degrees/s - threshold for stationary
+}
 
 /**
  * Pre-computed fusion result for a single frame
@@ -26,6 +83,10 @@ export interface FusionFrame {
   imu?: IMUData;
   mag?: MAGData;
   calibratedMag?: { x: number; y: number; z: number };
+  // Fusion Ch.7 specific
+  internalStates?: FusionInternalStates;
+  earthAccel?: { x: number; y: number; z: number };
+  biasState?: BiasState;
 }
 
 // ============================================================================
@@ -39,7 +100,12 @@ export const state = {
   // Core components
   viewer: null as OrientationViewer | null,
   dataset: null as SensorDataset | null,
-  ahrs: null as MadgwickAHRS | null,
+  ahrs: null as AHRSInterface | null,
+  
+  // Algorithm selection
+  algorithm: 'fusion' as AlgorithmType,
+  madgwickAhrs: null as MadgwickAHRS | null,
+  fusionAhrs: null as FusionAhrsAdapter | null,
   
   // Playback state
   isPlaying: false,

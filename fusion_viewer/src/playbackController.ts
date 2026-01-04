@@ -18,7 +18,7 @@ import { debug } from './constants';
  * Pre-compute all fusion frames for smooth playback
  */
 export function computeFusionFrames(): void {
-  const { dataset, ahrs } = state;
+  const { dataset, ahrs, algorithm, fusionAhrs } = state;
   const elements = getElements();
   
   if (!dataset || !ahrs) return;
@@ -67,7 +67,8 @@ export function computeFusionFrames(): void {
       const output = ahrs.getOutput();
       const calMag = ahrs.getCalibratedMag();
       
-      state.fusionFrames.push({
+      // Build base frame
+      const frame: FusionFrame = {
         timestamp: reading.timestamp,
         quaternion: output.quaternion,
         euler: output.euler,
@@ -75,7 +76,16 @@ export function computeFusionFrames(): void {
         imu: lastIMU,
         mag: lastMAG,
         calibratedMag: calMag.valid ? { x: calMag.x, y: calMag.y, z: calMag.z } : undefined
-      });
+      };
+      
+      // Add Fusion-specific states if using Fusion algorithm
+      if (algorithm === 'fusion' && fusionAhrs) {
+        frame.internalStates = fusionAhrs.getInternalStates();
+        frame.earthAccel = fusionAhrs.getEarthAcceleration();
+        frame.biasState = fusionAhrs.getBiasState();
+      }
+      
+      state.fusionFrames.push(frame);
     }
   }
   
@@ -244,7 +254,7 @@ export function handleSpeedChange(): void {
  * Update all displays for a given frame index
  */
 export function updateDisplay(frameIndex: number): void {
-  const { dataset, viewer, ahrs, fusionFrames } = state;
+  const { dataset, viewer, ahrs, fusionFrames, algorithm } = state;
   const elements = getElements();
   
   if (!dataset || fusionFrames.length === 0 || !viewer) return;
@@ -301,6 +311,11 @@ export function updateDisplay(frameIndex: number): void {
   if (frame.mag) {
     updateMagDisplay(frame.mag, frame.calibratedMag);
   }
+  
+  // Update Fusion-specific displays
+  if (algorithm === 'fusion' && frame.internalStates) {
+    updateFusionDisplay(frame.internalStates, frame.biasState);
+  }
 }
 
 /**
@@ -350,5 +365,64 @@ function updateMagDisplay(
   if (calibratedMag) {
     elements.rawMagDisplay.textContent = 
       `Mag: X=${calibratedMag.x.toFixed(3)}, Y=${calibratedMag.y.toFixed(3)}, Z=${calibratedMag.z.toFixed(3)}`;
+  }
+}
+/**
+ * Update Fusion Ch.7 specific status displays
+ */
+function updateFusionDisplay(
+  internalStates: NonNullable<FusionFrame['internalStates']>,
+  biasState?: FusionFrame['biasState']
+): void {
+  const elements = getElements();
+  
+  // Acceleration status
+  elements.accelStatus.textContent = internalStates.accelerometerIgnored ? '⚠️ IGN' : '✓ OK';
+  elements.accelStatus.style.color = internalStates.accelerometerIgnored ? '#ff6b6b' : '#6bff6b';
+  elements.accelError.textContent = internalStates.accelerationError.toFixed(1);
+  
+  // Magnetic status
+  elements.magStatus.textContent = internalStates.magnetometerIgnored ? '⚠️ IGN' : '✓ OK';
+  elements.magStatus.style.color = internalStates.magnetometerIgnored ? '#ff6b6b' : '#6bff6b';
+  elements.magError.textContent = internalStates.magneticError.toFixed(1);
+  
+  // Build flags string
+  const flags: string[] = [];
+  if (internalStates.accelerationRecoveryTrigger > 0) {
+    flags.push(`A:${(internalStates.accelerationRecoveryTrigger * 100).toFixed(0)}%`);
+  }
+  if (internalStates.magneticRecoveryTrigger > 0) {
+    flags.push(`M:${(internalStates.magneticRecoveryTrigger * 100).toFixed(0)}%`);
+  }
+  elements.ahrsFlags.textContent = flags.length > 0 ? flags.join(' ') : 'Ready';
+  
+  // Runtime bias display
+  if (biasState) {
+    elements.runtimeBiasX.textContent = biasState.bias.x.toFixed(3);
+    elements.runtimeBiasY.textContent = biasState.bias.y.toFixed(3);
+    elements.runtimeBiasZ.textContent = biasState.bias.z.toFixed(3);
+    
+    if (biasState.isCalibrating) {
+      elements.biasCalStatus.textContent = '🔄 Updating';
+      elements.biasCalStatus.style.color = '#6bff6b';
+    } else if (biasState.progress > 0) {
+      elements.biasCalStatus.textContent = '⏳ Stationary';
+      elements.biasCalStatus.style.color = '#ffff6b';
+    } else {
+      elements.biasCalStatus.textContent = '⏸️ Moving';
+      elements.biasCalStatus.style.color = '#888';
+    }
+    
+    elements.biasProgress.textContent = biasState.progress > 0 
+      ? `(${(biasState.progress * 100).toFixed(0)}%)` 
+      : '';
+    
+    // Show gyro magnitude for debugging
+    elements.gyroMagnitude.textContent = biasState.gyroMagnitude.toFixed(1);
+    elements.stationaryThreshold.textContent = biasState.stationaryThreshold.toFixed(1);
+    
+    // Color code gyro magnitude based on threshold
+    const magColor = biasState.gyroMagnitude < biasState.stationaryThreshold ? '#6bff6b' : '#ff6b6b';
+    elements.gyroMagnitude.style.color = magColor;
   }
 }

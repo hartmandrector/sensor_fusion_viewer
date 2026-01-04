@@ -10,12 +10,13 @@
  */
 
 import { MadgwickAHRS } from './fusion';
+import { FusionAhrsAdapter } from './FusionAhrsAdapter';
 import { parseCSV } from './csvParser';
 import { OrientationViewer } from './viewer';
 import { debug } from './constants';
 
 // State and UI modules
-import { state } from './appState';
+import { state, type AlgorithmType } from './appState';
 import { getElements, initializeElements } from './uiElements';
 
 // Controller modules
@@ -61,14 +62,42 @@ function init(): void {
   // Initialize calibration UI with defaults
   initializeCalibrationUI();
   
-  // Initialize AHRS with default settings
+  // Initialize both AHRS algorithms
   const calConfig = getInitialCalibrationConfig();
-  state.ahrs = new MadgwickAHRS({
-    beta: 0.1,
+  const elements = getElements();
+  
+  // Get initial values from UI
+  const gain = parseFloat(elements.betaSlider.value);
+  const accelReject = parseFloat(elements.accelRejectSlider.value);
+  const magReject = parseFloat(elements.magRejectSlider.value);
+  
+  // Create both algorithms
+  state.madgwickAhrs = new MadgwickAHRS({
+    beta: gain,
     ...calConfig,
   });
   
+  state.fusionAhrs = new FusionAhrsAdapter(
+    { beta: gain, ...calConfig },
+    { 
+      ahrs: { 
+        gain: gain,
+        accelerationRejection: accelReject,
+        magneticRejection: magReject,
+        gyroscopeRange: 2000
+      } 
+    }
+  );
+  
+  // Set active algorithm based on UI
+  state.algorithm = elements.algorithmSelect.value as AlgorithmType;
+  state.ahrs = state.algorithm === 'fusion' ? state.fusionAhrs : state.madgwickAhrs;
+  
+  // Show/hide fusion-specific settings
+  updateFusionSettingsVisibility();
+  
   debug.log('FlySight Fusion Viewer initialized');
+  debug.log(`Algorithm: ${state.algorithm}`);
 }
 
 // ============================================================================
@@ -91,11 +120,18 @@ function setupEventListeners(): void {
   elements.timeSlider.addEventListener('input', handleSliderChange);
   elements.speedSelect.addEventListener('change', handleSpeedChange);
   
+  // Algorithm selection
+  elements.algorithmSelect.addEventListener('change', handleAlgorithmChange);
+  
   // Filter parameters
   elements.betaSlider.addEventListener('input', handleBetaChange);
   elements.initFromSensors.addEventListener('change', handleInitModeChange);
   elements.useMagnetometer.addEventListener('change', handleUseMagChange);
   elements.showSensorVectors.addEventListener('change', handleShowVectorsChange);
+  
+  // Fusion Ch.7 specific
+  elements.accelRejectSlider.addEventListener('input', handleAccelRejectChange);
+  elements.magRejectSlider.addEventListener('input', handleMagRejectChange);
   
   // Axis remapping
   elements.imuRemapX.addEventListener('change', handleAxisRemapChange);
@@ -187,6 +223,83 @@ async function handleFileSelect(event: Event): Promise<void> {
 // ============================================================================
 
 /**
+ * Handle algorithm selection change
+ */
+function handleAlgorithmChange(): void {
+  const elements = getElements();
+  state.algorithm = elements.algorithmSelect.value as AlgorithmType;
+  
+  // Switch active AHRS
+  state.ahrs = state.algorithm === 'fusion' ? state.fusionAhrs : state.madgwickAhrs;
+  
+  // Copy calibration between algorithms
+  if (state.fusionAhrs && state.madgwickAhrs) {
+    const imuCal = state.algorithm === 'fusion' 
+      ? state.madgwickAhrs.getIMUCalibration()
+      : state.fusionAhrs.getIMUCalibration();
+    const magCal = state.algorithm === 'fusion'
+      ? state.madgwickAhrs.getMagCalibration()
+      : state.fusionAhrs.getMagCalibration();
+    
+    state.ahrs?.setIMUCalibration(imuCal);
+    state.ahrs?.setMagCalibration(magCal);
+  }
+  
+  updateFusionSettingsVisibility();
+  
+  debug.log(`Switched to algorithm: ${state.algorithm}`);
+  
+  if (state.dataset) {
+    computeFusionFrames();
+    updateDisplay(state.playbackIndex);
+  }
+}
+
+/**
+ * Show/hide fusion-specific settings
+ */
+function updateFusionSettingsVisibility(): void {
+  const elements = getElements();
+  elements.fusionSettings.style.display = state.algorithm === 'fusion' ? 'block' : 'none';
+}
+
+/**
+ * Handle acceleration rejection threshold change
+ */
+function handleAccelRejectChange(): void {
+  const elements = getElements();
+  const value = parseFloat(elements.accelRejectSlider.value);
+  elements.accelRejectValue.textContent = value.toString();
+  
+  if (state.fusionAhrs) {
+    state.fusionAhrs.updateAhrsSettings({ accelerationRejection: value });
+    
+    if (state.dataset && state.algorithm === 'fusion') {
+      computeFusionFrames();
+      updateDisplay(state.playbackIndex);
+    }
+  }
+}
+
+/**
+ * Handle magnetic rejection threshold change
+ */
+function handleMagRejectChange(): void {
+  const elements = getElements();
+  const value = parseFloat(elements.magRejectSlider.value);
+  elements.magRejectValue.textContent = value.toString();
+  
+  if (state.fusionAhrs) {
+    state.fusionAhrs.updateAhrsSettings({ magneticRejection: value });
+    
+    if (state.dataset && state.algorithm === 'fusion') {
+      computeFusionFrames();
+      updateDisplay(state.playbackIndex);
+    }
+  }
+}
+
+/**
  * Handle beta slider change
  */
 function handleBetaChange(): void {
@@ -194,8 +307,15 @@ function handleBetaChange(): void {
   const beta = parseFloat(elements.betaSlider.value);
   elements.betaValue.textContent = beta.toFixed(2);
   
-  if (state.ahrs) {
-    state.ahrs.setBeta(beta);
+  // Update both algorithms
+  if (state.madgwickAhrs) {
+    state.madgwickAhrs.setBeta(beta);
+  }
+  if (state.fusionAhrs) {
+    state.fusionAhrs.updateAhrsSettings({ gain: beta });
+  }
+  
+  if (state.dataset) {
     computeFusionFrames();
     updateDisplay(state.playbackIndex);
   }

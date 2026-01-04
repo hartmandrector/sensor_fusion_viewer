@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FlySight 2 Sensor Fusion Viewer</title>
-  <script type="module" crossorigin src="./assets/index-DoGTEA5S.js"></script>
+  <script type="module" crossorigin src="./assets/index-Dast6AkN.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-BUr2gc7W.css">
 </head>
 <body>
@@ -67,12 +67,50 @@
 
         <!-- Fusion Parameters -->
         <section class="control-section">
-          <h2>Madgwick Filter</h2>
+          <h2>AHRS Algorithm</h2>
           <div class="param-control">
-            <label for="betaSlider">Beta (gain):</label>
-            <input type="range" id="betaSlider" min="0.01" max="0.5" step="0.01" value="0.1" />
-            <span id="betaValue">0.10</span>
+            <label for="algorithmSelect">Algorithm:</label>
+            <select id="algorithmSelect">
+              <option value="madgwick">Madgwick (Ch. 3)</option>
+              <option value="fusion" selected>Fusion (Ch. 7)</option>
+            </select>
           </div>
+          <div class="param-control">
+            <label for="betaSlider">Gain:</label>
+            <input type="range" id="betaSlider" min="0.01" max="1.0" step="0.01" value="0.5" />
+            <span id="betaValue">0.50</span>
+          </div>
+          
+          <!-- Fusion Ch. 7 specific settings -->
+          <div id="fusionSettings">
+            <div class="param-control">
+              <label for="accelRejectSlider">Accel Reject (°):</label>
+              <input type="range" id="accelRejectSlider" min="0" max="90" step="1" value="10" />
+              <span id="accelRejectValue">10</span>
+            </div>
+            <div class="param-control">
+              <label for="magRejectSlider">Mag Reject (°):</label>
+              <input type="range" id="magRejectSlider" min="0" max="90" step="1" value="10" />
+              <span id="magRejectValue">10</span>
+            </div>
+            <div class="ahrs-status" style="font-size: 0.75rem; padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 4px; margin-top: 0.5rem;">
+              <div>Accel: <span id="accelStatus">OK</span> (<span id="accelError">0.0</span>°)</div>
+              <div>Mag: <span id="magStatus">OK</span> (<span id="magError">0.0</span>°)</div>
+              <div>State: <span id="ahrsFlags">Ready</span></div>
+            </div>
+            <div class="runtime-bias" style="font-size: 0.7rem; padding: 0.5rem; background: rgba(100,200,255,0.1); border-radius: 4px; margin-top: 0.5rem;">
+              <div style="font-weight: bold; margin-bottom: 0.25rem;">Runtime Bias (°/s):</div>
+              <div>X: <span id="runtimeBiasX">0.000</span> Y: <span id="runtimeBiasY">0.000</span> Z: <span id="runtimeBiasZ">0.000</span></div>
+              <div style="margin-top: 0.25rem;">
+                <span id="biasCalStatus">⏸️ Waiting</span>
+                <span style="margin-left: 0.5rem; color: #888;" id="biasProgress"></span>
+              </div>
+              <div style="margin-top: 0.25rem; color: #aaa;">
+                Gyro: <span id="gyroMagnitude">0.0</span>°/s (thresh: <span id="stationaryThreshold">3.0</span>°/s)
+              </div>
+            </div>
+          </div>
+          
           <div class="checkbox-control">
             <input type="checkbox" id="initFromSensors" checked />
             <label for="initFromSensors">Initialize from first sample</label>
