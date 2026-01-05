@@ -142,3 +142,49 @@ export interface SensorVectors {
   mag: Vector3;
   gyro: Vector3;
 }
+
+// ============================================================================
+// Calibration File Types
+// ============================================================================
+
+/**
+ * Calibration file format - all fields optional for partial calibrations
+ */
+export interface CalibrationFile {
+  // Metadata
+  version: number;
+  deviceSerial?: string;
+  description?: string;
+  createdAt?: string;
+  
+  // Hard Iron Calibration (mag offset)
+  hardIron?: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  
+  // Soft Iron Calibration (3x3 matrix)
+  softIronMatrix?: number[][];
+  
+  // Gyro Bias
+  gyroBias?: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  
+  // Accel Bias/Offset
+  accelBias?: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  
+  // Accel Scale Matrix (from 6-pos calibration)
+  accelScaleMatrix?: number[][];
+  
+  // Axis Remapping
+  imuAxisRemap?: AxisRemap;
+  magAxisRemap?: AxisRemap;
+}

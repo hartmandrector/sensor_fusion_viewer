@@ -40,7 +40,11 @@ import {
   handleCalculateIMUCalibration,
   handleAnalyzeIMU,
   handleAxisRemapChange,
+  handleCalculateEllipsoid,
+  handleCalculate6PosCalibration,
 } from './calibrationManager';
+
+import { initializeCalibrationFileUI } from './calibrationFile';
 
 // ============================================================================
 // Initialization
@@ -61,6 +65,9 @@ function init(): void {
   
   // Initialize calibration UI with defaults
   initializeCalibrationUI();
+  
+  // Initialize calibration file save/load
+  initializeCalibrationFileUI();
   
   // Initialize both AHRS algorithms
   const calConfig = getInitialCalibrationConfig();
@@ -157,6 +164,10 @@ function setupEventListeners(): void {
   elements.accelOffsetZ.addEventListener('change', handleIMUCalChange);
   elements.calcIMUCalBtn.addEventListener('click', handleCalculateIMUCalibration);
   elements.analyzeIMUBtn.addEventListener('click', handleAnalyzeIMU);
+  
+  // Advanced calibration
+  elements.calcEllipsoidBtn.addEventListener('click', handleCalculateEllipsoid);
+  elements.calc6PosCalBtn.addEventListener('click', handleCalculate6PosCalibration);
 }
 
 // ============================================================================
@@ -208,6 +219,8 @@ async function handleFileSelect(event: Event): Promise<void> {
     elements.showMagPlotBtn.disabled = false;
     elements.calcIMUCalBtn.disabled = false;
     elements.analyzeIMUBtn.disabled = false;
+    elements.calcEllipsoidBtn.disabled = false;
+    elements.calc6PosCalBtn.disabled = false;
     
     // Reset playback
     resetPlayback();
@@ -243,6 +256,14 @@ function handleAlgorithmChange(): void {
     
     state.ahrs?.setIMUCalibration(imuCal);
     state.ahrs?.setMagCalibration(magCal);
+    
+    // Also copy matrix calibrations (accel scale matrix and soft iron matrix)
+    if (state.accelScaleMatrix && state.ahrs?.setAccelScaleMatrix) {
+      state.ahrs.setAccelScaleMatrix(state.accelScaleMatrix);
+    }
+    if (state.softIronMatrix && state.ahrs?.setSoftIronMatrix) {
+      state.ahrs.setSoftIronMatrix(state.softIronMatrix);
+    }
   }
   
   updateFusionSettingsVisibility();

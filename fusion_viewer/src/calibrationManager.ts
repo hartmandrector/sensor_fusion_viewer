@@ -10,6 +10,8 @@ import { computeFusionFrames, updateDisplay } from './playbackController';
 import { getMAGReadings, getIMUReadings } from './csvParser';
 import { calculateHardIronCalibration, evaluateCalibrationQuality } from './magCalibration';
 import { calculateIMUCalibration, analyzeIMUData } from './imuCalibration';
+import { fitEllipsoid, formatSoftIronMatrix } from './ellipsoidFit';
+import { calibrate6Position, detectStationarySegments, selectBestSegments, formatOrientationStatus } from './accelCalibration6Pos';
 import type { MagCalibration, IMUCalibration, AxisRemap } from './types';
 import { debug } from './constants';
 
@@ -304,6 +306,254 @@ export function handleAnalyzeIMU(): void {
 }
 
 // ============================================================================
+// Ellipsoid Magnetometer Calibration
+// ============================================================================
+
+/**
+ * Calculate full ellipsoid (9-parameter) magnetometer calibration
+ */
+export function handleCalculateEllipsoid(): void {
+  if (!state.dataset) return;
+  
+  const elements = getElements();
+  const magSamples = getMAGReadings(state.dataset);
+  
+  if (magSamples.length < 100) {
+    elements.calibrationResult.innerHTML = '<div class="error">Need at least 100 mag samples for ellipsoid fit</div>';
+    elements.calibrationResult.classList.add('visible');
+    return;
+  }
+  
+  // Extract magnetometer xyz
+  const points = magSamples.map(s => ({ x: s.x, y: s.y, z: s.z }));
+  
+  try {
+    const result = fitEllipsoid(points);
+    
+    // Store the ellipsoid result for later use
+    state.lastEllipsoidCalibration = result;
+    
+    // Build result HTML
+    let html = `
+      <div class="cal-label">Hard Iron Offset:</div>
+      <div>X: <span class="cal-value">${result.hardIronOffset.x.toFixed(4)}</span></div>
+      <div>Y: <span class="cal-value">${result.hardIronOffset.y.toFixed(4)}</span></div>
+      <div>Z: <span class="cal-value">${result.hardIronOffset.z.toFixed(4)}</span></div>
+      <div style="margin-top: 0.5rem;">
+        <span class="cal-label">Sphericity:</span> 
+        <span class="quality-${result.sphericity > 0.9 ? 'good' : result.sphericity > 0.7 ? 'fair' : 'poor'}">${(result.sphericity * 100).toFixed(1)}%</span>
+      </div>
+      <div><span class="cal-label">Residual RMS:</span> <span class="cal-value">${result.residualRms.toFixed(4)}</span></div>
+    `;
+    
+    // Display soft iron matrix
+    elements.softIronMatrixDisplay.innerHTML = formatSoftIronMatrix(result.softIronMatrix);
+    
+    html += `<button class="apply-btn" onclick="window.applyEllipsoidCalibration()">Apply Calibration</button>`;
+    
+    elements.calibrationResult.innerHTML = html;
+    elements.calibrationResult.classList.add('visible');
+    
+    debug.log('Ellipsoid Calibration:', result);
+    
+  } catch (error) {
+    elements.calibrationResult.innerHTML = `<div class="error">Ellipsoid fit failed: ${error}</div>`;
+    elements.calibrationResult.classList.add('visible');
+    debug.error('Ellipsoid fit failed:', error);
+  }
+}
+
+/**
+ * Apply ellipsoid calibration (hard iron + soft iron)
+ */
+export function applyEllipsoidCalibration(): void {
+  if (!state.lastEllipsoidCalibration) return;
+  
+  const elements = getElements();
+  elements.magOffsetX.value = state.lastEllipsoidCalibration.hardIronOffset.x.toFixed(4);
+  elements.magOffsetY.value = state.lastEllipsoidCalibration.hardIronOffset.y.toFixed(4);
+  elements.magOffsetZ.value = state.lastEllipsoidCalibration.hardIronOffset.z.toFixed(4);
+  
+  // Store soft iron matrix in state
+  state.softIronMatrix = state.lastEllipsoidCalibration.softIronInverse;
+  
+  // Apply soft iron matrix to BOTH AHRS instances (so it persists when switching algorithms)
+  if (state.fusionAhrs?.setSoftIronMatrix) {
+    state.fusionAhrs.setSoftIronMatrix(state.lastEllipsoidCalibration.softIronInverse);
+  }
+  if (state.madgwickAhrs?.setSoftIronMatrix) {
+    state.madgwickAhrs.setSoftIronMatrix(state.lastEllipsoidCalibration.softIronInverse);
+  }
+  debug.log('Applied soft iron matrix to both AHRS:', state.lastEllipsoidCalibration.softIronInverse);
+  
+  // Also apply hard iron via normal mag cal change
+  handleMagCalChange();
+  
+  debug.log('Applied ellipsoid calibration (hard iron + soft iron)');
+}
+
+// ============================================================================
+// 6-Position Accelerometer Calibration
+// ============================================================================
+
+/**
+ * Calculate 6-position accelerometer calibration
+ */
+export function handleCalculate6PosCalibration(): void {
+  if (!state.dataset) return;
+  
+  const elements = getElements();
+  const imuSamples = getIMUReadings(state.dataset);
+  
+  if (imuSamples.length < 600) {
+    elements.sixPosStatus.innerHTML = '<div class="error">Need at least 600 IMU samples (100 per position)</div>';
+    elements.sixPosStatus.classList.add('visible');
+    return;
+  }
+  
+  // Convert IMU data to separate accel and gyro arrays for segment detection
+  const accelData = imuSamples.map(s => ({
+    timestamp: s.timestamp,
+    x: s.ax,
+    y: s.ay,
+    z: s.az
+  }));
+  
+  const gyroData = imuSamples.map(s => ({
+    timestamp: s.timestamp,
+    x: s.wx,
+    y: s.wy,
+    z: s.wz
+  }));
+  
+  // Detect stationary segments using gyro threshold
+  const segments = detectStationarySegments(accelData, gyroData);
+  
+  debug.log(`Detected ${segments.length} stationary segments`);
+  console.log('6-Pos Cal: Detected segments:', segments);
+  
+  // Select best segment for each orientation
+  const bestSegments = selectBestSegments(segments);
+  
+  console.log('6-Pos Cal: Best segments:', [...bestSegments.entries()]);
+  
+  // Display orientation status
+  elements.orientationStatus.innerHTML = formatOrientationStatus(bestSegments);
+  elements.orientationStatus.classList.add('visible');
+  
+  // Check if we have all 6 positions
+  const validOrientations = bestSegments.size;
+  
+  if (validOrientations < 6) {
+    elements.sixPosStatus.innerHTML = `
+      <div class="warning">
+        Only ${validOrientations}/6 positions detected.<br>
+        Place device in each orientation (±10° tolerance) and keep stationary for 0.5s.
+      </div>`;
+    elements.sixPosStatus.classList.add('visible');
+    return;
+  }
+  
+  // All 6 positions found - run calibration
+  try {
+    const result = calibrate6Position(bestSegments);
+    
+    // Store result
+    state.lastAccel6PosCalibration = result;
+    
+    // Build result HTML
+    let html = '<div class="calibration-values">';
+    html += `<strong>6-Position Accel Calibration</strong><br><br>`;
+    
+    html += `<strong>Bias (g):</strong><br>`;
+    html += `X: ${result.bias.x.toFixed(6)}<br>`;
+    html += `Y: ${result.bias.y.toFixed(6)}<br>`;
+    html += `Z: ${result.bias.z.toFixed(6)}<br><br>`;
+    
+    html += `<strong>Cross-Axis Coupling:</strong><br>`;
+    const crossAxis = result.crossAxis;
+    html += `XY: ${(crossAxis.xy * 100).toFixed(3)}%<br>`;
+    html += `XZ: ${(crossAxis.xz * 100).toFixed(3)}%<br>`;
+    html += `YZ: ${(crossAxis.yz * 100).toFixed(3)}%<br><br>`;
+    
+    html += `<strong>Residual RMS:</strong> ${result.residualRms.toFixed(6)} g<br>`;
+    
+    html += `</div>`;
+    html += `<button class="apply-btn" onclick="window.apply6PosCalibration()">Apply Bias Only</button>`;
+    html += `<button class="apply-btn" onclick="window.apply6PosFullCalibration()" style="margin-left: 0.5rem;">Apply Full Matrix</button>`;
+    
+    elements.sixPosStatus.innerHTML = html;
+    elements.sixPosStatus.classList.add('visible');
+    
+    // Display scale matrix
+    const S = result.scaleMatrix;
+    let matrixHtml = '<table class="matrix-table">';
+    matrixHtml += `<tr><td>${S[0][0].toFixed(6)}</td><td>${S[0][1].toFixed(6)}</td><td>${S[0][2].toFixed(6)}</td></tr>`;
+    matrixHtml += `<tr><td>${S[1][0].toFixed(6)}</td><td>${S[1][1].toFixed(6)}</td><td>${S[1][2].toFixed(6)}</td></tr>`;
+    matrixHtml += `<tr><td>${S[2][0].toFixed(6)}</td><td>${S[2][1].toFixed(6)}</td><td>${S[2][2].toFixed(6)}</td></tr>`;
+    matrixHtml += '</table>';
+    elements.accelScaleMatrixDisplay.innerHTML = matrixHtml;
+    
+    debug.log('6-Position Calibration:', result);
+    
+  } catch (error) {
+    elements.sixPosStatus.innerHTML = `<div class="error">Calibration failed: ${error}</div>`;
+    elements.sixPosStatus.classList.add('visible');
+    debug.error('6-Position calibration failed:', error);
+  }
+}
+
+/**
+ * Apply 6-position calibration (bias only for simple UI)
+ */
+export function apply6PosCalibration(): void {
+  if (!state.lastAccel6PosCalibration) return;
+  
+  const elements = getElements();
+  elements.accelOffsetX.value = state.lastAccel6PosCalibration.bias.x.toFixed(6);
+  elements.accelOffsetY.value = state.lastAccel6PosCalibration.bias.y.toFixed(6);
+  elements.accelOffsetZ.value = state.lastAccel6PosCalibration.bias.z.toFixed(6);
+  
+  handleIMUCalChange();
+  
+  debug.log('Applied 6-pos calibration (bias only)');
+}
+
+/**
+ * Apply 6-position calibration with full scale matrix
+ */
+export function apply6PosFullCalibration(): void {
+  if (!state.lastAccel6PosCalibration) return;
+  
+  const elements = getElements();
+  
+  // Apply bias to UI fields
+  elements.accelOffsetX.value = state.lastAccel6PosCalibration.bias.x.toFixed(6);
+  elements.accelOffsetY.value = state.lastAccel6PosCalibration.bias.y.toFixed(6);
+  elements.accelOffsetZ.value = state.lastAccel6PosCalibration.bias.z.toFixed(6);
+  
+  // Store the full calibration in state for both AHRS implementations
+  state.accelScaleMatrix = state.lastAccel6PosCalibration.scaleMatrixInverse;
+  state.accelBias = [
+    state.lastAccel6PosCalibration.bias.x,
+    state.lastAccel6PosCalibration.bias.y,
+    state.lastAccel6PosCalibration.bias.z
+  ];
+  
+  // Apply scale matrix to BOTH AHRS instances (so it persists when switching algorithms)
+  if (state.fusionAhrs?.setAccelScaleMatrix) {
+    state.fusionAhrs.setAccelScaleMatrix(state.lastAccel6PosCalibration.scaleMatrixInverse);
+  }
+  if (state.madgwickAhrs?.setAccelScaleMatrix) {
+    state.madgwickAhrs.setAccelScaleMatrix(state.lastAccel6PosCalibration.scaleMatrixInverse);
+  }
+  
+  handleIMUCalChange();
+  
+  debug.log('Applied 6-pos full calibration to both AHRS with scale matrix:', state.lastAccel6PosCalibration.scaleMatrixInverse);
+}
+
+// ============================================================================
 // Axis Remapping
 // ============================================================================
 
@@ -351,3 +601,6 @@ export function handleAxisRemapChange(): void {
 // Expose functions to window for button onclick handlers
 (window as unknown as { applyCalibration: () => void }).applyCalibration = applyCalibration;
 (window as unknown as { applyIMUCalibration: () => void }).applyIMUCalibration = applyIMUCalibration;
+(window as unknown as { applyEllipsoidCalibration: () => void }).applyEllipsoidCalibration = applyEllipsoidCalibration;
+(window as unknown as { apply6PosCalibration: () => void }).apply6PosCalibration = apply6PosCalibration;
+(window as unknown as { apply6PosFullCalibration: () => void }).apply6PosFullCalibration = apply6PosFullCalibration;

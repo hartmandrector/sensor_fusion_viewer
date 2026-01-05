@@ -111,8 +111,16 @@ export interface UIElements {
   accelOffsetY: HTMLInputElement;
   accelOffsetZ: HTMLInputElement;
   calcIMUCalBtn: HTMLButtonElement;
+  calc6PosCalBtn: HTMLButtonElement;
   analyzeIMUBtn: HTMLButtonElement;
   imuCalibrationResult: HTMLDivElement;
+  accelScaleMatrixDisplay: HTMLDivElement;
+  sixPosStatus: HTMLDivElement;
+  orientationStatus: HTMLDivElement;
+  
+  // Mag calibration - ellipsoid
+  calcEllipsoidBtn: HTMLButtonElement;
+  softIronMatrixDisplay: HTMLDivElement;
 }
 
 // ============================================================================
@@ -234,8 +242,16 @@ export function initializeElements(): UIElements {
     accelOffsetY: getElement<HTMLInputElement>('accelOffsetY'),
     accelOffsetZ: getElement<HTMLInputElement>('accelOffsetZ'),
     calcIMUCalBtn: getElement<HTMLButtonElement>('calcIMUCalBtn'),
+    calc6PosCalBtn: getElement<HTMLButtonElement>('calc6PosCalBtn'),
     analyzeIMUBtn: getElement<HTMLButtonElement>('analyzeIMUBtn'),
     imuCalibrationResult: getElement<HTMLDivElement>('imuCalibrationResult'),
+    accelScaleMatrixDisplay: getElement<HTMLDivElement>('accelScaleMatrixDisplay'),
+    sixPosStatus: getElement<HTMLDivElement>('sixPosStatus'),
+    orientationStatus: getElement<HTMLDivElement>('orientationStatus'),
+    
+    // Mag calibration - ellipsoid
+    calcEllipsoidBtn: getElement<HTMLButtonElement>('calcEllipsoidBtn'),
+    softIronMatrixDisplay: getElement<HTMLDivElement>('softIronMatrixDisplay'),
   };
 }
 

@@ -79,6 +79,10 @@ export class FusionAhrsAdapter {
   private imuAxisRemap: AxisRemap;
   private magAxisRemap: AxisRemap;
   
+  // Full calibration matrices (optional, for advanced calibration)
+  private accelScaleMatrix: number[][] | null = null;
+  private softIronMatrix: number[][] | null = null;
+  
   // Last magnetometer (for async update)
   private lastMagNWU: FusionVector;
   private lastMagBody: FusionVector;  // Body frame for display
@@ -174,6 +178,46 @@ export class FusionAhrsAdapter {
     this.imuCal.accelOffsetZ = z;
   }
   
+  /**
+   * Set full 3x3 accelerometer scale matrix (inverse of the scale matrix from calibration)
+   * This corrects for scale factors and cross-axis coupling
+   */
+  setAccelScaleMatrix(matrix: number[][] | null): void {
+    if (matrix && matrix.length === 3 && matrix[0].length === 3) {
+      this.accelScaleMatrix = matrix.map(row => [...row]);
+      debug.log('Accel scale matrix set:', this.accelScaleMatrix);
+    } else {
+      this.accelScaleMatrix = null;
+    }
+  }
+  
+  /**
+   * Set soft iron correction matrix for magnetometer
+   * This corrects for soft iron distortion (ellipsoid → sphere)
+   */
+  setSoftIronMatrix(matrix: number[][] | null): void {
+    if (matrix && matrix.length === 3 && matrix[0].length === 3) {
+      this.softIronMatrix = matrix.map(row => [...row]);
+      debug.log('Soft iron matrix set:', this.softIronMatrix);
+    } else {
+      this.softIronMatrix = null;
+    }
+  }
+  
+  /**
+   * Get current accel scale matrix
+   */
+  getAccelScaleMatrix(): number[][] | null {
+    return this.accelScaleMatrix ? this.accelScaleMatrix.map(row => [...row]) : null;
+  }
+  
+  /**
+   * Get current soft iron matrix
+   */
+  getSoftIronMatrix(): number[][] | null {
+    return this.softIronMatrix ? this.softIronMatrix.map(row => [...row]) : null;
+  }
+  
   // ===========================================================================
   // Axis Remapping
   // ===========================================================================
@@ -247,10 +291,26 @@ export class FusionAhrsAdapter {
    * Update magnetometer (stored for next IMU update)
    */
   updateMag(mx: number, my: number, mz: number): void {
-    // Apply calibration
-    const calX = (mx - this.magCal.offsetX) * this.magCal.scaleX;
-    const calY = (my - this.magCal.offsetY) * this.magCal.scaleY;
-    const calZ = (mz - this.magCal.offsetZ) * this.magCal.scaleZ;
+    // Apply hard iron calibration (subtract offset)
+    let calX = mx - this.magCal.offsetX;
+    let calY = my - this.magCal.offsetY;
+    let calZ = mz - this.magCal.offsetZ;
+    
+    // Apply soft iron matrix if available (full ellipsoid correction)
+    if (this.softIronMatrix) {
+      const W = this.softIronMatrix;
+      const newX = W[0][0] * calX + W[0][1] * calY + W[0][2] * calZ;
+      const newY = W[1][0] * calX + W[1][1] * calY + W[1][2] * calZ;
+      const newZ = W[2][0] * calX + W[2][1] * calY + W[2][2] * calZ;
+      calX = newX;
+      calY = newY;
+      calZ = newZ;
+    } else {
+      // Fall back to simple scale factors
+      calX *= this.magCal.scaleX;
+      calY *= this.magCal.scaleY;
+      calZ *= this.magCal.scaleZ;
+    }
     
     // Remap to body frame
     const body = this.applyAxisRemap(calX, calY, calZ, this.magAxisRemap);
@@ -273,14 +333,32 @@ export class FusionAhrsAdapter {
    * @param az Accel Z in g
    */
   updateIMU(dt: number, wx: number, wy: number, wz: number, ax: number, ay: number, az: number): void {
-    // Apply IMU calibration
+    // Apply gyro calibration (bias subtraction)
     const gx = (wx - this.imuCal.gyroBiasX) * DEG_TO_RAD;
     const gy = (wy - this.imuCal.gyroBiasY) * DEG_TO_RAD;
     const gz = (wz - this.imuCal.gyroBiasZ) * DEG_TO_RAD;
     
-    const calAx = ax - this.imuCal.accelOffsetX;
-    const calAy = ay - this.imuCal.accelOffsetY;
-    const calAz = az - this.imuCal.accelOffsetZ;
+    // Apply accel calibration
+    let calAx: number, calAy: number, calAz: number;
+    
+    if (this.accelScaleMatrix) {
+      // Full calibration: corrected = S^(-1) * (raw - bias)
+      // First subtract bias
+      const bx = ax - this.imuCal.accelOffsetX;
+      const by = ay - this.imuCal.accelOffsetY;
+      const bz = az - this.imuCal.accelOffsetZ;
+      
+      // Then apply inverse scale matrix
+      const S = this.accelScaleMatrix;
+      calAx = S[0][0] * bx + S[0][1] * by + S[0][2] * bz;
+      calAy = S[1][0] * bx + S[1][1] * by + S[1][2] * bz;
+      calAz = S[2][0] * bx + S[2][1] * by + S[2][2] * bz;
+    } else {
+      // Simple calibration: just subtract offset
+      calAx = ax - this.imuCal.accelOffsetX;
+      calAy = ay - this.imuCal.accelOffsetY;
+      calAz = az - this.imuCal.accelOffsetZ;
+    }
     
     // Remap to body frame
     const gyroBody = this.applyAxisRemap(gx, gy, gz, this.imuAxisRemap);

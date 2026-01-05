@@ -11,6 +11,8 @@ import type { FusionAhrsAdapter } from './FusionAhrsAdapter';
 import type { OrientationViewer } from './viewer';
 import type { MagCalibrationResult } from './magCalibration';
 import type { IMUCalibrationResult } from './imuCalibration';
+import type { EllipsoidFitResult } from './ellipsoidFit';
+import type { AccelCalibration6PosResult } from './accelCalibration6Pos';
 
 // ============================================================================
 // Algorithm Type
@@ -42,6 +44,9 @@ export interface AHRSInterface {
   applyIMURemap(x: number, y: number, z: number): { x: number; y: number; z: number };
   setIMUAxisRemap?(remap: import('./types').AxisRemap): void;
   setMagAxisRemap?(remap: import('./types').AxisRemap): void;
+  // Optional advanced calibration methods
+  setSoftIronMatrix?(matrix: number[][]): void;
+  setAccelScaleMatrix?(matrix: number[][]): void;
 }
 
 // ============================================================================
@@ -120,6 +125,13 @@ export const state = {
   // Calibration results
   lastMagCalibration: null as MagCalibrationResult | null,
   lastIMUCalibration: null as IMUCalibrationResult | null,
+  lastEllipsoidCalibration: null as EllipsoidFitResult | null,
+  lastAccel6PosCalibration: null as AccelCalibration6PosResult | null,
+  
+  // Full calibration matrices (for advanced calibration)
+  accelScaleMatrix: null as number[][] | null,
+  accelBias: null as number[] | null,
+  softIronMatrix: null as number[][] | null,
 };
 
 // ============================================================================

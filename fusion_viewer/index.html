@@ -217,8 +217,16 @@
               <input type="number" id="magOffsetZ" value="-0.5380" step="0.01" />
             </div>
           </div>
+          <div class="param-control">
+            <label>Soft Iron Matrix:</label>
+            <div class="matrix-display" id="softIronMatrixDisplay" style="font-family: monospace; font-size: 0.7rem; background: rgba(255,255,255,0.05); padding: 0.5rem; border-radius: 4px; white-space: pre;">
+1.0000  0.0000  0.0000
+0.0000  1.0000  0.0000
+0.0000  0.0000  1.0000</div>
+          </div>
           <div class="calibration-actions">
-            <button id="calcCalibrationBtn" disabled>Calculate from Data</button>
+            <button id="calcCalibrationBtn" disabled>Sphere Fit (Hard Iron)</button>
+            <button id="calcEllipsoidBtn" disabled>Ellipsoid Fit (Full)</button>
             <button id="showMagPlotBtn" disabled>Show 3D Plot</button>
           </div>
           <div id="calibrationResult" class="calibration-result"></div>
@@ -243,11 +251,25 @@
               <input type="number" id="accelOffsetZ" value="0.0450" step="0.001" />
             </div>
           </div>
+          <div class="param-control">
+            <label>Accel Scale Matrix:</label>
+            <div class="matrix-display" id="accelScaleMatrixDisplay" style="font-family: monospace; font-size: 0.7rem; background: rgba(255,255,255,0.05); padding: 0.5rem; border-radius: 4px; white-space: pre;">
+1.0000  0.0000  0.0000
+0.0000  1.0000  0.0000
+0.0000  0.0000  1.0000</div>
+          </div>
           <div class="calibration-actions">
-            <button id="calcIMUCalBtn" disabled>Calculate from Stationary Data</button>
+            <button id="calcIMUCalBtn" disabled>Single Position Cal</button>
+            <button id="calc6PosCalBtn" disabled>6-Position Cal</button>
             <button id="analyzeIMUBtn" disabled>Analyze IMU Data</button>
           </div>
           <div id="imuCalibrationResult" class="calibration-result"></div>
+          
+          <!-- 6-Position Calibration Status -->
+          <div id="sixPosStatus" class="calibration-result">
+            <h4 style="margin: 0 0 0.5rem 0;">Detected Orientations:</h4>
+            <div id="orientationStatus" style="font-family: monospace; font-size: 0.75rem;"></div>
+          </div>
         </section>
 
         <!-- Sensor Data Display -->
@@ -285,6 +307,17 @@
             <div>IMU Rate: <span id="imuRate">0</span> Hz</div>
             <div>MAG Rate: <span id="magRate">0</span> Hz</div>
           </div>
+        </section>
+
+        <!-- Calibration File Save/Load -->
+        <section class="control-section">
+          <h2>Calibration File</h2>
+          <div class="calibration-file-actions">
+            <button id="saveCalibrationBtn">Save Calibration</button>
+            <button id="loadCalibrationBtn">Load Calibration</button>
+            <input type="file" id="calibrationFileInput" accept=".json" style="display: none;" />
+          </div>
+          <div id="calibrationFileStatus" class="calibration-status" style="font-size: 0.75rem; margin-top: 0.5rem; color: #888;"></div>
         </section>
       </aside>
     </main>

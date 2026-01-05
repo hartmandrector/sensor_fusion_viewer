@@ -50,6 +50,10 @@ export class MadgwickAHRS {
   private imuAxisRemap: AxisRemap;
   private magAxisRemap: AxisRemap;
   
+  // Full calibration matrices (optional, for advanced calibration)
+  private accelScaleMatrix: number[][] | null = null;
+  private softIronMatrix: number[][] | null = null;
+  
   // Last magnetometer values (for async update)
   private lastMagX: number = 0;
   private lastMagY: number = 0;
@@ -369,6 +373,44 @@ export class MadgwickAHRS {
   }
   
   /**
+   * Set full 3x3 accelerometer scale matrix (inverse of the scale matrix from calibration)
+   */
+  setAccelScaleMatrix(matrix: number[][] | null): void {
+    if (matrix && matrix.length === 3 && matrix[0].length === 3) {
+      this.accelScaleMatrix = matrix.map(row => [...row]);
+      debug.log('Madgwick: Accel scale matrix set');
+    } else {
+      this.accelScaleMatrix = null;
+    }
+  }
+  
+  /**
+   * Set soft iron correction matrix for magnetometer
+   */
+  setSoftIronMatrix(matrix: number[][] | null): void {
+    if (matrix && matrix.length === 3 && matrix[0].length === 3) {
+      this.softIronMatrix = matrix.map(row => [...row]);
+      debug.log('Madgwick: Soft iron matrix set');
+    } else {
+      this.softIronMatrix = null;
+    }
+  }
+  
+  /**
+   * Get current accel scale matrix
+   */
+  getAccelScaleMatrix(): number[][] | null {
+    return this.accelScaleMatrix ? this.accelScaleMatrix.map(row => [...row]) : null;
+  }
+  
+  /**
+   * Get current soft iron matrix
+   */
+  getSoftIronMatrix(): number[][] | null {
+    return this.softIronMatrix ? this.softIronMatrix.map(row => [...row]) : null;
+  }
+  
+  /**
    * Set IMU axis remapping
    */
   setIMUAxisRemap(remap: AxisRemap): void {
@@ -436,13 +478,29 @@ export class MadgwickAHRS {
    */
   updateMag(mx: number, my: number, mz: number): void {
     // Apply hard iron calibration (offset removal)
-    mx = (mx - this.magCal.offsetX) * this.magCal.scaleX;
-    my = (my - this.magCal.offsetY) * this.magCal.scaleY;
-    mz = (mz - this.magCal.offsetZ) * this.magCal.scaleZ;
+    let calX = mx - this.magCal.offsetX;
+    let calY = my - this.magCal.offsetY;
+    let calZ = mz - this.magCal.offsetZ;
+    
+    // Apply soft iron matrix if available (full ellipsoid correction)
+    if (this.softIronMatrix) {
+      const W = this.softIronMatrix;
+      const newX = W[0][0] * calX + W[0][1] * calY + W[0][2] * calZ;
+      const newY = W[1][0] * calX + W[1][1] * calY + W[1][2] * calZ;
+      const newZ = W[2][0] * calX + W[2][1] * calY + W[2][2] * calZ;
+      calX = newX;
+      calY = newY;
+      calZ = newZ;
+    } else {
+      // Fall back to simple scale factors
+      calX *= this.magCal.scaleX;
+      calY *= this.magCal.scaleY;
+      calZ *= this.magCal.scaleZ;
+    }
     
     // Apply axis remapping (sensor frame to body frame)
     // Use the MAG axis remap dropdowns to configure any axis inversions/swaps
-    const remapped = this.applyAxisRemap(mx, my, mz, this.magAxisRemap);
+    const remapped = this.applyAxisRemap(calX, calY, calZ, this.magAxisRemap);
     
     // Store for use in IMU update
     this.lastMagX = remapped.x;
@@ -485,10 +543,25 @@ export class MadgwickAHRS {
     gy -= this.imuCal.gyroBiasY;
     gz -= this.imuCal.gyroBiasZ;
     
-    // Apply IMU calibration - subtract accel offset
-    ax -= this.imuCal.accelOffsetX;
-    ay -= this.imuCal.accelOffsetY;
-    az -= this.imuCal.accelOffsetZ;
+    // Apply accel calibration
+    let calAx: number, calAy: number, calAz: number;
+    
+    if (this.accelScaleMatrix) {
+      // Full calibration: corrected = S^(-1) * (raw - bias)
+      const bx = ax - this.imuCal.accelOffsetX;
+      const by = ay - this.imuCal.accelOffsetY;
+      const bz = az - this.imuCal.accelOffsetZ;
+      
+      const S = this.accelScaleMatrix;
+      calAx = S[0][0] * bx + S[0][1] * by + S[0][2] * bz;
+      calAy = S[1][0] * bx + S[1][1] * by + S[1][2] * bz;
+      calAz = S[2][0] * bx + S[2][1] * by + S[2][2] * bz;
+    } else {
+      // Simple calibration: just subtract offset
+      calAx = ax - this.imuCal.accelOffsetX;
+      calAy = ay - this.imuCal.accelOffsetY;
+      calAz = az - this.imuCal.accelOffsetZ;
+    }
     
     // Apply axis remapping (sensor frame to body frame)
     const gyroRemap = this.applyAxisRemap(gx, gy, gz, this.imuAxisRemap);
@@ -496,7 +569,7 @@ export class MadgwickAHRS {
     gy = gyroRemap.y;
     gz = gyroRemap.z;
     
-    const accelRemap = this.applyAxisRemap(ax, ay, az, this.imuAxisRemap);
+    const accelRemap = this.applyAxisRemap(calAx, calAy, calAz, this.imuAxisRemap);
     ax = accelRemap.x;
     ay = accelRemap.y;
     az = accelRemap.z;
