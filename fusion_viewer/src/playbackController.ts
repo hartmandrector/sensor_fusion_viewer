@@ -67,7 +67,7 @@ export function computeFusionFrames(): void {
       const output = ahrs.getOutput();
       const calMag = ahrs.getCalibratedMag();
       
-      // Build base frame
+      // Build base frame with acceleration vectors computed NOW (while AHRS state is current)
       const frame: FusionFrame = {
         timestamp: reading.timestamp,
         quaternion: output.quaternion,
@@ -75,13 +75,16 @@ export function computeFusionFrames(): void {
         heading: output.heading,
         imu: lastIMU,
         mag: lastMAG,
-        calibratedMag: calMag.valid ? { x: calMag.x, y: calMag.y, z: calMag.z } : undefined
+        calibratedMag: calMag.valid ? { x: calMag.x, y: calMag.y, z: calMag.z } : undefined,
+        // Store acceleration vectors computed from current AHRS state
+        linearAccel: ahrs.getLinearAcceleration(),
+        earthAccel: ahrs.getEarthAcceleration(),
+        gravity: ahrs.getGravityVector()
       };
       
       // Add Fusion-specific states if using Fusion algorithm
       if (algorithm === 'fusion' && fusionAhrs) {
         frame.internalStates = fusionAhrs.getInternalStates();
-        frame.earthAccel = fusionAhrs.getEarthAcceleration();
         frame.biasState = fusionAhrs.getBiasState();
       }
       
@@ -286,6 +289,14 @@ export function updateDisplay(frameIndex: number): void {
     const gyro = ahrs.applyIMURemap(rawGyro.x, rawGyro.y, rawGyro.z);
     
     viewer.updateSensorVectors(accel, frame.calibratedMag || null, gyro);
+    
+    // Update linear acceleration, earth acceleration, and gravity vectors
+    // Use pre-computed values from the frame (computed when AHRS state was current)
+    viewer.updateAccelerationVectors(
+      frame.linearAccel || null,
+      frame.earthAccel || null,
+      frame.gravity || null
+    );
   }
   
   // Update orientation display

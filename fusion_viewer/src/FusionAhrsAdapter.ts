@@ -2,7 +2,33 @@
  * FusionAhrsAdapter - Adapter to integrate FusionAhrs with existing viewer architecture
  * 
  * Provides the same interface as MadgwickAHRS for drop-in replacement.
- * Handles coordinate transforms (sensor → body → world) and calibration.
+ * Handles coordinate transforms (sensor → body → NWU) and calibration.
+ * 
+ * ============================================================================
+ * COORDINATE SYSTEM PIPELINE
+ * ============================================================================
+ * 
+ * 1. SENSOR FRAME (raw data from IMU/Mag chips)
+ *    - Axes defined by sensor orientation on PCB
+ *    - May need axis remapping to align with device body
+ * 
+ * 2. DEVICE BODY FRAME (FlySight 2 convention)
+ *    - X = West (left side when facing front)
+ *    - Y = Up (toward LED)
+ *    - Z = North (out the front face)
+ * 
+ * 3. NWU ALGORITHM FRAME (Fusion library convention)
+ *    - X = North
+ *    - Y = West
+ *    - Z = Up
+ * 
+ * INPUT PATH (sensor data → algorithm):
+ *   Sensor → (axis remap) → Body → (bodyToNWU) → NWU → FusionAhrs.update()
+ * 
+ * OUTPUT PATH (algorithm → display):
+ *   FusionAhrs outputs → (nwuToBody for body-frame quantities) → Display
+ *   
+ *   Note: Earth-frame acceleration stays in NWU (it's a world-frame vector)
  * 
  * @license MIT
  */
@@ -275,12 +301,39 @@ export class FusionAhrsAdapter {
   }
   
   /**
-   * Body frame → NWU world frame transform
-   * FlySight body: X=West, Y=Up, Z=North
-   * NWU: X=North, Y=West, Z=Up
+   * Body frame → NWU algorithm frame transform
+   * 
+   * FlySight Body Frame:    NWU Algorithm Frame:
+   *   X = West                 X = North
+   *   Y = Up                   Y = West
+   *   Z = North                Z = Up
+   * 
+   * Transform: NWU = [Body_Z, Body_X, Body_Y]
    */
   private bodyToNWU(bx: number, by: number, bz: number): FusionVector {
-    return { x: bz, y: bx, z: by };  // North=bodyZ, West=bodyX, Up=bodyY
+    return { 
+      x: bz,  // NWU_X (North) = Body_Z (North)
+      y: bx,  // NWU_Y (West)  = Body_X (West)
+      z: by   // NWU_Z (Up)    = Body_Y (Up)
+    };
+  }
+  
+  /**
+   * NWU algorithm frame → Body frame transform (inverse of bodyToNWU)
+   * 
+   * NWU Algorithm Frame:     FlySight Body Frame:
+   *   X = North                 X = West
+   *   Y = West                  Y = Up  
+   *   Z = Up                    Z = North
+   * 
+   * Transform: Body = [NWU_Y, NWU_Z, NWU_X]
+   */
+  private nwuToBody(nx: number, ny: number, nz: number): FusionVector {
+    return {
+      x: ny,  // Body_X (West)  = NWU_Y (West)
+      y: nz,  // Body_Y (Up)    = NWU_Z (Up)
+      z: nx   // Body_Z (North) = NWU_X (North)
+    };
   }
   
   // ===========================================================================
@@ -561,25 +614,51 @@ export class FusionAhrsAdapter {
   }
   
   /**
-   * Get linear acceleration (sensor frame, gravity removed)
+   * Get gravity direction in body frame
+   * 
+   * The AHRS returns gravity in NWU frame, we transform to body frame
+   * for consistency with sensor data and viewer expectations.
+   * 
+   * Note: For visualization in world frame, the viewer can ignore this
+   * and simply display [0,0,+1] in NWU world (gravity reaction = up).
    */
-  getLinearAcceleration(): FusionVector {
-    return this.ahrs.getLinearAcceleration();
+  getGravityVector(): { x: number; y: number; z: number } {
+    const gNWU = this.ahrs.getGravity();
+    return this.nwuToBody(gNWU.x, gNWU.y, gNWU.z);
   }
   
   /**
-   * Get Earth-frame acceleration (world frame, gravity removed)
-   * This is what you need for trajectory estimation!
+   * Get linear acceleration in body frame (gravity removed)
+   * 
+   * This is the acceleration the device is experiencing, expressed
+   * in the device's coordinate system. Useful for local motion detection.
    */
-  getEarthAcceleration(): FusionVector {
-    return this.ahrs.getEarthAcceleration();
+  getLinearAcceleration(): { x: number; y: number; z: number } {
+    const aNWU = this.ahrs.getLinearAcceleration();
+    // Transform NWU → Body frame
+    return this.nwuToBody(aNWU.x, aNWU.y, aNWU.z);
   }
   
   /**
-   * Get gravity direction in sensor frame
+   * Get Earth-frame acceleration in NWU convention (gravity removed)
+   * 
+   * This is the acceleration in the global/world frame:
+   *   X = North, Y = West, Z = Up
+   * 
+   * Useful for trajectory estimation and dead reckoning.
+   * Note: Returned in NWU, NOT body frame (it's a world-frame quantity).
+   */
+  getEarthAcceleration(): { x: number; y: number; z: number } {
+    const a = this.ahrs.getEarthAcceleration();
+    // Earth acceleration stays in NWU (world frame) - no transform needed
+    return { x: a.x, y: a.y, z: a.z };
+  }
+  
+  /**
+   * Get gravity direction in body frame (alias for getGravityVector)
    */
   getGravity(): FusionVector {
-    return this.ahrs.getGravity();
+    return this.getGravityVector();
   }
   
   /**

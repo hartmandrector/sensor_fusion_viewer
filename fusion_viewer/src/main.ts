@@ -36,6 +36,7 @@ import {
   handleMagCalChange,
   handleCalculateCalibration,
   handleShowMagPlot,
+  handleShowIMUPlot,
   handleIMUCalChange,
   handleCalculateIMUCalibration,
   handleAnalyzeIMU,
@@ -44,7 +45,12 @@ import {
   handleCalculate6PosCalibration,
 } from './calibrationManager';
 
-import { initializeCalibrationFileUI } from './calibrationFile';
+import { initializeCalibrationExecutive } from './calibrationExecutive';
+
+import { handleExportFusedData } from './fusedDataExport';
+
+import { computeIntegration } from './accelerationIntegration';
+import { initializeCharts, updateComponentChart, destroyCharts } from './integrationCharts';
 
 // ============================================================================
 // Initialization
@@ -66,8 +72,8 @@ function init(): void {
   // Initialize calibration UI with defaults
   initializeCalibrationUI();
   
-  // Initialize calibration file save/load
-  initializeCalibrationFileUI();
+  // Initialize calibration executive (handles save/load and status tracking)
+  initializeCalibrationExecutive();
   
   // Initialize both AHRS algorithms
   const calConfig = getInitialCalibrationConfig();
@@ -135,6 +141,9 @@ function setupEventListeners(): void {
   elements.initFromSensors.addEventListener('change', handleInitModeChange);
   elements.useMagnetometer.addEventListener('change', handleUseMagChange);
   elements.showSensorVectors.addEventListener('change', handleShowVectorsChange);
+  elements.showLinearAccel.addEventListener('change', handleShowLinearAccelChange);
+  elements.showEarthAccel.addEventListener('change', handleShowEarthAccelChange);
+  elements.showGravity.addEventListener('change', handleShowGravityChange);
   
   // Fusion Ch.7 specific
   elements.accelRejectSlider.addEventListener('input', handleAccelRejectChange);
@@ -164,10 +173,21 @@ function setupEventListeners(): void {
   elements.accelOffsetZ.addEventListener('change', handleIMUCalChange);
   elements.calcIMUCalBtn.addEventListener('click', handleCalculateIMUCalibration);
   elements.analyzeIMUBtn.addEventListener('click', handleAnalyzeIMU);
+  elements.showIMUPlotBtn.addEventListener('click', handleShowIMUPlot);
   
   // Advanced calibration
   elements.calcEllipsoidBtn.addEventListener('click', handleCalculateEllipsoid);
   elements.calc6PosCalBtn.addEventListener('click', handleCalculate6PosCalibration);
+  
+  // Export
+  elements.exportFusedDataBtn.addEventListener('click', handleExportFusedData);
+  
+  // Acceleration Integration
+  elements.integrationStartSlider.addEventListener('input', handleIntegrationStartChange);
+  elements.calculateIntegrationBtn.addEventListener('click', handleCalculateIntegration);
+  elements.showChartsBtn.addEventListener('click', handleShowCharts);
+  elements.backToViewerBtn.addEventListener('click', handleBackToViewer);
+  elements.componentSelect.addEventListener('change', handleComponentSelectChange);
 }
 
 // ============================================================================
@@ -189,6 +209,7 @@ async function handleFileSelect(event: Event): Promise<void> {
   try {
     const content = await file.text();
     state.dataset = parseCSV(content);
+    state.currentFileName = file.name;
     
     debug.log(`Loaded ${state.dataset.readings.length} sensor readings`);
     debug.log(`Firmware: ${state.dataset.firmwareVersion}`);
@@ -219,8 +240,22 @@ async function handleFileSelect(event: Event): Promise<void> {
     elements.showMagPlotBtn.disabled = false;
     elements.calcIMUCalBtn.disabled = false;
     elements.analyzeIMUBtn.disabled = false;
+    elements.showIMUPlotBtn.disabled = false;
     elements.calcEllipsoidBtn.disabled = false;
     elements.calc6PosCalBtn.disabled = false;
+    
+    // Enable export button
+    elements.exportFusedDataBtn.disabled = false;
+    
+    // Enable integration controls
+    // Slider uses relative time (0 to duration), but we store the absolute start time as a data attribute
+    elements.integrationStartSlider.disabled = false;
+    elements.integrationStartSlider.min = '0';
+    elements.integrationStartSlider.max = state.dataset.duration.toFixed(3);
+    elements.integrationStartSlider.value = '0';
+    elements.integrationStartSlider.dataset.startTime = state.dataset.startTime.toFixed(6);
+    elements.integrationStartTime.textContent = '0.000s';
+    elements.calculateIntegrationBtn.disabled = false;
     
     // Reset playback
     resetPlayback();
@@ -371,6 +406,140 @@ function handleShowVectorsChange(): void {
     state.viewer.toggleSensorVectors(elements.showSensorVectors.checked);
     updateDisplay(state.playbackIndex);
   }
+}
+
+/**
+ * Handle show linear acceleration toggle
+ */
+function handleShowLinearAccelChange(): void {
+  const elements = getElements();
+  if (state.viewer) {
+    state.viewer.toggleLinearAccel(elements.showLinearAccel.checked);
+    updateDisplay(state.playbackIndex);
+  }
+}
+
+/**
+ * Handle show earth acceleration toggle
+ */
+function handleShowEarthAccelChange(): void {
+  const elements = getElements();
+  if (state.viewer) {
+    state.viewer.toggleEarthAccel(elements.showEarthAccel.checked);
+    updateDisplay(state.playbackIndex);
+  }
+}
+
+/**
+ * Handle show gravity toggle
+ */
+function handleShowGravityChange(): void {
+  const elements = getElements();
+  if (state.viewer) {
+    state.viewer.toggleGravity(elements.showGravity.checked);
+    updateDisplay(state.playbackIndex);
+  }
+}
+
+// ============================================================================
+// Acceleration Integration Handlers
+// ============================================================================
+
+/**
+ * Handle integration start time slider change
+ */
+function handleIntegrationStartChange(): void {
+  const elements = getElements();
+  const value = parseFloat(elements.integrationStartSlider.value);
+  elements.integrationStartTime.textContent = value.toFixed(3) + 's';
+}
+
+/**
+ * Handle calculate integration button click
+ */
+function handleCalculateIntegration(): void {
+  const elements = getElements();
+  
+  console.log('Calculate Integration clicked');
+  
+  if (!state.fusionFrames.length) {
+    console.log('No fusion frames available');
+    return;
+  }
+  
+  // Slider value is relative (0 to duration), convert to absolute timestamp
+  const relativeTime = parseFloat(elements.integrationStartSlider.value);
+  const datasetStartTime = parseFloat(elements.integrationStartSlider.dataset.startTime || '0');
+  const startTime = datasetStartTime + relativeTime;
+  
+  console.log(`Relative time: ${relativeTime.toFixed(3)}s, Dataset start: ${datasetStartTime.toFixed(3)}s`);
+  
+  console.log(`Computing integration from t=${startTime.toFixed(3)}s`);
+  
+  state.integrationResult = computeIntegration(state.fusionFrames, startTime);
+  
+  if (state.integrationResult) {
+    console.log(`Integration complete: ${state.integrationResult.time.length} points, startIndex=${state.integrationResult.startIndex}`);
+    elements.showChartsBtn.disabled = false;
+    
+    // If charts panel is visible, update the charts immediately
+    const chartsPanelVisible = window.getComputedStyle(elements.chartsPanel).display !== 'none';
+    console.log(`Charts panel visible: ${chartsPanelVisible}`);
+    
+    if (chartsPanelVisible) {
+      console.log('Updating charts...');
+      initializeCharts(state.integrationResult);
+    }
+  }
+}
+
+/**
+ * Handle show charts button click
+ */
+function handleShowCharts(): void {
+  const elements = getElements();
+  
+  if (!state.integrationResult) {
+    debug.error('No integration results available');
+    return;
+  }
+  
+  // Hide 3D viewer, show charts panel
+  elements.viewerPanel.style.display = 'none';
+  elements.chartsPanel.style.display = 'flex';
+  
+  // Initialize charts with data
+  initializeCharts(state.integrationResult);
+  
+  // Update button text
+  elements.showChartsBtn.textContent = 'Update Charts';
+}
+
+/**
+ * Handle back to viewer button click
+ */
+function handleBackToViewer(): void {
+  const elements = getElements();
+  
+  // Hide charts panel, show 3D viewer
+  elements.chartsPanel.style.display = 'none';
+  elements.viewerPanel.style.display = 'block';
+  
+  // Destroy charts to free memory
+  destroyCharts();
+  
+  // Update button text
+  elements.showChartsBtn.textContent = 'Show Integration Charts';
+}
+
+/**
+ * Handle component select dropdown change
+ */
+function handleComponentSelectChange(): void {
+  const elements = getElements();
+  const component = elements.componentSelect.value;
+  
+  updateComponentChart(component as any);
 }
 
 // ============================================================================

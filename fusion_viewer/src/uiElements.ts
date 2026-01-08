@@ -36,6 +36,9 @@ export interface UIElements {
   initFromSensors: HTMLInputElement;
   useMagnetometer: HTMLInputElement;
   showSensorVectors: HTMLInputElement;
+  showLinearAccel: HTMLInputElement;
+  showEarthAccel: HTMLInputElement;
+  showGravity: HTMLInputElement;
   
   // Fusion Ch.7 specific
   accelRejectSlider: HTMLInputElement;
@@ -113,6 +116,7 @@ export interface UIElements {
   calcIMUCalBtn: HTMLButtonElement;
   calc6PosCalBtn: HTMLButtonElement;
   analyzeIMUBtn: HTMLButtonElement;
+  showIMUPlotBtn: HTMLButtonElement;
   imuCalibrationResult: HTMLDivElement;
   accelScaleMatrixDisplay: HTMLDivElement;
   sixPosStatus: HTMLDivElement;
@@ -121,6 +125,26 @@ export interface UIElements {
   // Mag calibration - ellipsoid
   calcEllipsoidBtn: HTMLButtonElement;
   softIronMatrixDisplay: HTMLDivElement;
+  
+  // Export
+  exportFusedDataBtn: HTMLButtonElement;
+  exportStatus: HTMLDivElement;
+  
+  // Acceleration Integration
+  integrationStartSlider: HTMLInputElement;
+  integrationStartTime: HTMLSpanElement;
+  calculateIntegrationBtn: HTMLButtonElement;
+  showChartsBtn: HTMLButtonElement;
+  
+  // Charts panel
+  chartsPanel: HTMLDivElement;
+  viewerPanel: HTMLDivElement;
+  componentSelect: HTMLSelectElement;
+  backToViewerBtn: HTMLButtonElement;
+  componentChartCanvas: HTMLCanvasElement;
+  topDownChartCanvas: HTMLCanvasElement;
+  profileChartCanvas: HTMLCanvasElement;
+  speedChartCanvas: HTMLCanvasElement;
 }
 
 // ============================================================================
@@ -167,6 +191,9 @@ export function initializeElements(): UIElements {
     initFromSensors: getElement<HTMLInputElement>('initFromSensors'),
     useMagnetometer: getElement<HTMLInputElement>('useMagnetometer'),
     showSensorVectors: getElement<HTMLInputElement>('showSensorVectors'),
+    showLinearAccel: getElement<HTMLInputElement>('showLinearAccel'),
+    showEarthAccel: getElement<HTMLInputElement>('showEarthAccel'),
+    showGravity: getElement<HTMLInputElement>('showGravity'),
     
     // Fusion Ch.7 specific
     accelRejectSlider: getElement<HTMLInputElement>('accelRejectSlider'),
@@ -244,6 +271,7 @@ export function initializeElements(): UIElements {
     calcIMUCalBtn: getElement<HTMLButtonElement>('calcIMUCalBtn'),
     calc6PosCalBtn: getElement<HTMLButtonElement>('calc6PosCalBtn'),
     analyzeIMUBtn: getElement<HTMLButtonElement>('analyzeIMUBtn'),
+    showIMUPlotBtn: getElement<HTMLButtonElement>('showIMUPlotBtn'),
     imuCalibrationResult: getElement<HTMLDivElement>('imuCalibrationResult'),
     accelScaleMatrixDisplay: getElement<HTMLDivElement>('accelScaleMatrixDisplay'),
     sixPosStatus: getElement<HTMLDivElement>('sixPosStatus'),
@@ -252,6 +280,26 @@ export function initializeElements(): UIElements {
     // Mag calibration - ellipsoid
     calcEllipsoidBtn: getElement<HTMLButtonElement>('calcEllipsoidBtn'),
     softIronMatrixDisplay: getElement<HTMLDivElement>('softIronMatrixDisplay'),
+    
+    // Export
+    exportFusedDataBtn: getElement<HTMLButtonElement>('exportFusedDataBtn'),
+    exportStatus: getElement<HTMLDivElement>('exportStatus'),
+    
+    // Acceleration Integration
+    integrationStartSlider: getElement<HTMLInputElement>('integrationStartSlider'),
+    integrationStartTime: getElement<HTMLSpanElement>('integrationStartTime'),
+    calculateIntegrationBtn: getElement<HTMLButtonElement>('calculateIntegrationBtn'),
+    showChartsBtn: getElement<HTMLButtonElement>('showChartsBtn'),
+    
+    // Charts panel
+    chartsPanel: getElement<HTMLDivElement>('chartsPanel'),
+    viewerPanel: getElement<HTMLDivElement>('viewerPanel'),
+    componentSelect: getElement<HTMLSelectElement>('componentSelect'),
+    backToViewerBtn: getElement<HTMLButtonElement>('backToViewerBtn'),
+    componentChartCanvas: getElement<HTMLCanvasElement>('componentChartCanvas'),
+    topDownChartCanvas: getElement<HTMLCanvasElement>('topDownChartCanvas'),
+    profileChartCanvas: getElement<HTMLCanvasElement>('profileChartCanvas'),
+    speedChartCanvas: getElement<HTMLCanvasElement>('speedChartCanvas'),
   };
 }
 

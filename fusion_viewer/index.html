@@ -21,7 +21,7 @@
     <!-- Main Content -->
     <main class="main-content">
       <!-- 3D Viewer -->
-      <section class="viewer-panel">
+      <section class="viewer-panel" id="viewerPanel">
         <div id="threejs-container"></div>
         <div class="viewer-overlay">
           <div class="orientation-display">
@@ -31,6 +31,44 @@
           </div>
           <div class="quaternion-display">
             <div>Q: [<span id="qw">1.00</span>, <span id="qx">0.00</span>, <span id="qy">0.00</span>, <span id="qz">0.00</span>]</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Integration Charts View (hidden by default) -->
+      <section class="viewer-panel charts-panel" id="chartsPanel" style="display: none;">
+        <div class="charts-header">
+          <h2>Acceleration Integration Results</h2>
+          <button id="backToViewerBtn" class="back-to-viewer-btn">← Back to 3D Viewer</button>
+        </div>
+        <div class="charts-container">
+          <div class="chart-cell">
+            <div class="chart-header">
+              <select id="componentSelect">
+                <option value="pos-north">Position North</option>
+                <option value="pos-west">Position West</option>
+                <option value="pos-up">Position Up</option>
+                <option value="vel-north">Velocity North</option>
+                <option value="vel-west">Velocity West</option>
+                <option value="vel-up" selected>Velocity Up</option>
+                <option value="accel-north">Acceleration North</option>
+                <option value="accel-west">Acceleration West</option>
+                <option value="accel-up">Acceleration Up</option>
+              </select>
+            </div>
+            <canvas id="componentChartCanvas"></canvas>
+          </div>
+          <div class="chart-cell">
+            <h3>Top-Down View (North vs West)</h3>
+            <canvas id="topDownChartCanvas"></canvas>
+          </div>
+          <div class="chart-cell">
+            <h3>Profile View (Distance vs Altitude)</h3>
+            <canvas id="profileChartCanvas"></canvas>
+          </div>
+          <div class="chart-cell">
+            <h3>Speed Chart</h3>
+            <canvas id="speedChartCanvas"></canvas>
           </div>
         </div>
       </section>
@@ -121,6 +159,18 @@
           <div class="checkbox-control">
             <input type="checkbox" id="showSensorVectors" />
             <label for="showSensorVectors">Show sensor vectors (Accel/Mag/Gyro)</label>
+          </div>
+          <div class="checkbox-control">
+            <input type="checkbox" id="showLinearAccel" />
+            <label for="showLinearAccel">Show Linear Accel (L - pink)</label>
+          </div>
+          <div class="checkbox-control">
+            <input type="checkbox" id="showEarthAccel" />
+            <label for="showEarthAccel">Show Earth Accel (E - orange)</label>
+          </div>
+          <div class="checkbox-control">
+            <input type="checkbox" id="showGravity" />
+            <label for="showGravity">Show Gravity (Gv - cyan)</label>
           </div>
         </section>
 
@@ -227,7 +277,7 @@
           <div class="calibration-actions">
             <button id="calcCalibrationBtn" disabled>Sphere Fit (Hard Iron)</button>
             <button id="calcEllipsoidBtn" disabled>Ellipsoid Fit (Full)</button>
-            <button id="showMagPlotBtn" disabled>Show 3D Plot</button>
+            <button id="showMagPlotBtn" disabled>Show Mag Calibration</button>
           </div>
           <div id="calibrationResult" class="calibration-result"></div>
         </section>
@@ -262,6 +312,7 @@
             <button id="calcIMUCalBtn" disabled>Single Position Cal</button>
             <button id="calc6PosCalBtn" disabled>6-Position Cal</button>
             <button id="analyzeIMUBtn" disabled>Analyze IMU Data</button>
+            <button id="showIMUPlotBtn" disabled>Show Accel Calibration</button>
           </div>
           <div id="imuCalibrationResult" class="calibration-result"></div>
           
@@ -318,6 +369,26 @@
             <input type="file" id="calibrationFileInput" accept=".json" style="display: none;" />
           </div>
           <div id="calibrationFileStatus" class="calibration-status" style="font-size: 0.75rem; margin-top: 0.5rem; color: #888;"></div>
+          <div id="calibrationSummary" class="calibration-summary-container"></div>
+        </section>
+
+        <!-- Fused Data Export -->
+        <section class="control-section">
+          <h2>Export Fused Data</h2>
+          <button id="exportFusedDataBtn" disabled>Export to CSV</button>
+          <div id="exportStatus" style="font-size: 0.75rem; margin-top: 0.5rem; color: #888;"></div>
+        </section>
+
+        <!-- Acceleration Integration -->
+        <section class="control-section">
+          <h2>Acceleration Integration</h2>
+          <div class="param-control">
+            <label for="integrationStartSlider">Start Time:</label>
+            <input type="range" id="integrationStartSlider" min="0" max="100" value="0" step="0.001" disabled />
+            <span id="integrationStartTime" class="slider-value">0.000s</span>
+          </div>
+          <button id="calculateIntegrationBtn" disabled>Calculate Integration</button>
+          <button id="showChartsBtn" disabled>Show Integration Charts</button>
         </section>
       </aside>
     </main>

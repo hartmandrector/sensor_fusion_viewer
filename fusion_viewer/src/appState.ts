@@ -47,6 +47,10 @@ export interface AHRSInterface {
   // Optional advanced calibration methods
   setSoftIronMatrix?(matrix: number[][]): void;
   setAccelScaleMatrix?(matrix: number[][]): void;
+  // Acceleration outputs (gravity-compensated)
+  getGravityVector(): { x: number; y: number; z: number };
+  getLinearAcceleration(): { x: number; y: number; z: number };
+  getEarthAcceleration(): { x: number; y: number; z: number };
 }
 
 // ============================================================================
@@ -88,9 +92,12 @@ export interface FusionFrame {
   imu?: IMUData;
   mag?: MAGData;
   calibratedMag?: { x: number; y: number; z: number };
+  // Derived acceleration vectors (computed at frame time)
+  linearAccel?: { x: number; y: number; z: number };
+  earthAccel?: { x: number; y: number; z: number };
+  gravity?: { x: number; y: number; z: number };
   // Fusion Ch.7 specific
   internalStates?: FusionInternalStates;
-  earthAccel?: { x: number; y: number; z: number };
   biasState?: BiasState;
 }
 
@@ -106,6 +113,9 @@ export const state = {
   viewer: null as OrientationViewer | null,
   dataset: null as SensorDataset | null,
   ahrs: null as AHRSInterface | null,
+  
+  // Current file info
+  currentFileName: null as string | null,
   
   // Algorithm selection
   algorithm: 'fusion' as AlgorithmType,
@@ -132,6 +142,9 @@ export const state = {
   accelScaleMatrix: null as number[][] | null,
   accelBias: null as number[] | null,
   softIronMatrix: null as number[][] | null,
+  
+  // Integration results
+  integrationResult: null as import('./accelerationIntegration').IntegrationResult | null,
 };
 
 // ============================================================================
@@ -182,6 +195,7 @@ export function resetPlaybackState(): void {
 export function clearState(): void {
   state.viewer = null;
   state.dataset = null;
+  state.currentFileName = null;
   state.ahrs = null;
   state.isPlaying = false;
   state.playbackIndex = 0;

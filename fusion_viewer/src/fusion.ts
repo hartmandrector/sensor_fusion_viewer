@@ -60,6 +60,11 @@ export class MadgwickAHRS {
   private lastMagZ: number = 0;
   private magValid: boolean = false;
   
+  // Last calibrated accelerometer values (in body frame, for gravity/linear accel)
+  private lastAccelBodyX: number = 0;
+  private lastAccelBodyY: number = 0;
+  private lastAccelBodyZ: number = 0;
+  
   constructor(config?: Partial<FusionConfig>) {
     // Initialize to identity quaternion (no rotation)
     this.q = { w: 1, x: 0, y: 0, z: 0 };
@@ -574,6 +579,11 @@ export class MadgwickAHRS {
     ay = accelRemap.y;
     az = accelRemap.z;
     
+    // Store calibrated accel in body frame (for getLinearAcceleration/getGravityVector)
+    this.lastAccelBodyX = ax;
+    this.lastAccelBodyY = ay;
+    this.lastAccelBodyZ = az;
+    
     // Convert gyro from deg/s to rad/s
     gx *= DEG_TO_RAD;
     gy *= DEG_TO_RAD;
@@ -896,6 +906,89 @@ export class MadgwickAHRS {
       z: this.lastMagZ,
       valid: this.magValid
     };
+  }
+  
+  /**
+   * Get gravity vector in body frame (unit vector pointing toward gravity)
+   * Computed from the current orientation quaternion
+   * 
+   * This computes where the accelerometer READS +1g when stationary
+   * (reaction force to gravity). At identity orientation (level), this is [0, 0, +1].
+   */
+  getGravityVector(): { x: number; y: number; z: number } {
+    // The quaternion q rotates from body frame to NWU world frame: v_world = q * v_body * q^-1
+    // We want gravity direction in body frame.
+    // At rest, accelerometer reads the reaction to gravity = -g_world rotated to body frame
+    // In NWU, gravity points [0, 0, -1], so accelerometer reads [0, 0, +1] when level.
+    // 
+    // Formula from reference (FusionAhrs): gives direction accelerometer reads at rest
+    const q = this.q;
+    const gx = 2 * (q.x * q.z - q.w * q.y);
+    const gy = 2 * (q.w * q.x + q.y * q.z);
+    const gz = 2 * (q.w * q.w - 0.5 + q.z * q.z);  // Same as: q.w² + q.z² - q.x² - q.y²
+    
+    // DEBUG: Log quaternion and computed gravity
+    console.log(`getGravityVector: q=[${q.w.toFixed(3)}, ${q.x.toFixed(3)}, ${q.y.toFixed(3)}, ${q.z.toFixed(3)}] -> NWU=[${gx.toFixed(3)}, ${gy.toFixed(3)}, ${gz.toFixed(3)}]`);
+    
+    // NWU body: X=North, Y=West, Z=Up, but we want FlySight body: X=West, Y=Up, Z=North
+    // NWU -> FlySight body: x_body = y_nwu, y_body = z_nwu, z_body = x_nwu
+    const result = { x: gy, y: gz, z: gx };
+    console.log(`  -> Body=[${result.x.toFixed(3)}, ${result.y.toFixed(3)}, ${result.z.toFixed(3)}]`);
+    return result;
+  }
+  
+  /**
+   * Get linear acceleration in body frame (gravity removed)
+   * This is the acceleration the device is actually experiencing
+   */
+  getLinearAcceleration(): { x: number; y: number; z: number } {
+    const gravity = this.getGravityVector();
+    
+    // Linear acceleration = measured acceleration - gravity
+    // (gravity vector points toward gravity, so we subtract it)
+    return {
+      x: this.lastAccelBodyX - gravity.x,
+      y: this.lastAccelBodyY - gravity.y,
+      z: this.lastAccelBodyZ - gravity.z
+    };
+  }
+  
+  /**
+   * Get acceleration in earth/world frame (gravity removed)
+   * This is useful for trajectory integration.
+   * Returns in NWU world frame: X=North, Y=West, Z=Up
+   */
+  getEarthAcceleration(): { x: number; y: number; z: number } {
+    const linearAccel = this.getLinearAcceleration();
+    
+    // Rotate body-frame linear acceleration to world frame using orientation quaternion
+    const q = this.q;
+    
+    // linearAccel is in FlySight body frame (X=West, Y=Up, Z=North)
+    // First convert to NWU body frame (X=North, Y=West, Z=Up) for quaternion rotation
+    // FlySight body -> NWU: x_nwu = z_body, y_nwu = x_body, z_nwu = y_body
+    const axNWU = linearAccel.z;  // North = body.Z
+    const ayNWU = linearAccel.x;  // West = body.X
+    const azNWU = linearAccel.y;  // Up = body.Y
+    
+    // Rotate NWU body frame to NWU world frame: v_world = q * v_body * q^-1
+    // Using quaternion rotation formula:
+    const qw = q.w, qx = q.x, qy = q.y, qz = q.z;
+    
+    // Quaternion * vector (treating vector as quaternion [0, x, y, z])
+    const t0 = qw * axNWU + qy * azNWU - qz * ayNWU;
+    const t1 = qw * ayNWU + qz * axNWU - qx * azNWU;
+    const t2 = qw * azNWU + qx * ayNWU - qy * axNWU;
+    const t3 = -qx * axNWU - qy * ayNWU - qz * azNWU;
+    
+    // Result * quaternion conjugate
+    const exNWU = t3 * (-qx) + t0 * qw + t1 * (-qz) - t2 * (-qy);
+    const eyNWU = t3 * (-qy) + t1 * qw + t2 * (-qx) - t0 * (-qz);
+    const ezNWU = t3 * (-qz) + t2 * qw + t0 * (-qy) - t1 * (-qx);
+    
+    // Return in NWU world frame (X=North, Y=West, Z=Up)
+    // This is what the viewer expects for world-frame quantities
+    return { x: exNWU, y: eyNWU, z: ezNWU };
   }
   
   /**

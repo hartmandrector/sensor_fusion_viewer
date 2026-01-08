@@ -20,8 +20,10 @@ export class OrientationViewer {
   private controls: OrbitControls;
   private deviceGroup: THREE.Group;
   private magPlotGroup: THREE.Group | null = null;
+  private imuPlotGroup: THREE.Group | null = null;
   private animationId: number | null = null;
   private showingMagPlot: boolean = false;
+  private showingIMUPlot: boolean = false;
   
   // Sensor vector visualization
   private sensorVectorsGroup: THREE.Group;
@@ -32,6 +34,19 @@ export class OrientationViewer {
   private magWorldArrow: THREE.ArrowHelper | null = null;  // Mag in world frame
   private magWorldLabel: THREE.Sprite | null = null;
   private showSensorVectors: boolean = false;
+  
+  // Linear and Earth acceleration vectors
+  private linearAccelArrow: THREE.ArrowHelper | null = null;
+  private linearAccelLabel: THREE.Sprite | null = null;
+  private earthAccelArrow: THREE.ArrowHelper | null = null;
+  private earthAccelLabel: THREE.Sprite | null = null;
+  private showLinearAccel: boolean = false;
+  private showEarthAccel: boolean = false;
+  
+  // AHRS gravity vector (estimated gravity direction in body frame)
+  private gravityArrow: THREE.ArrowHelper | null = null;
+  private gravityLabel: THREE.Sprite | null = null;
+  private showGravity: boolean = false;
   
   // Gyro rotation arrows (curved)
   private gyroArrowX: THREE.Group | null = null;
@@ -401,8 +416,8 @@ export class OrientationViewer {
     // Update orbit controls (required for damping)
     this.controls.update();
     
-    // Auto-rotate when showing mag plot
-    if (this.showingMagPlot) {
+    // Auto-rotate when showing mag or IMU plot
+    if (this.showingMagPlot || this.showingIMUPlot) {
       this.controls.autoRotate = true;
       this.controls.autoRotateSpeed = 2.0;
     } else {
@@ -533,6 +548,182 @@ export class OrientationViewer {
   }
   
   /**
+   * Toggle IMU accelerometer 3D plot visualization
+   * Shows raw accel data for calibration visualization
+   */
+  toggleIMUPlot(
+    samples: { ax: number; ay: number; az: number }[],
+    calibration: { offsetX: number; offsetY: number; offsetZ: number }
+  ): void {
+    // If already showing, remove it
+    if (this.imuPlotGroup) {
+      this.scene.remove(this.imuPlotGroup);
+      this.imuPlotGroup = null;
+      this.showingIMUPlot = false;
+      this.deviceGroup.visible = true;
+      
+      // Reset camera
+      this.camera.position.set(3, 2, 3);
+      this.camera.lookAt(0, 0, 0);
+      return;
+    }
+    
+    // Create new plot group
+    this.imuPlotGroup = new THREE.Group();
+    this.showingIMUPlot = true;
+    this.deviceGroup.visible = false;
+    
+    // Scale factor (accel values are typically around 1g)
+    const scale = 1.5;
+    
+    // Create points for raw data (red)
+    const rawGeometry = new THREE.BufferGeometry();
+    const rawPositions: number[] = [];
+    
+    // Create points for calibrated data (green)
+    const calGeometry = new THREE.BufferGeometry();
+    const calPositions: number[] = [];
+    
+    for (const sample of samples) {
+      // Use raw accelerometer data
+      const x = sample.ax;
+      const y = sample.ay;
+      const z = sample.az;
+      
+      // Raw positions (before calibration)
+      rawPositions.push(x * scale, y * scale, z * scale);
+      
+      // Calibrated positions
+      const cx = (x - calibration.offsetX) * scale;
+      const cy = (y - calibration.offsetY) * scale;
+      const cz = (z - calibration.offsetZ) * scale;
+      calPositions.push(cx, cy, cz);
+    }
+    
+    rawGeometry.setAttribute('position', new THREE.Float32BufferAttribute(rawPositions, 3));
+    calGeometry.setAttribute('position', new THREE.Float32BufferAttribute(calPositions, 3));
+    
+    // Raw points (red, semi-transparent)
+    const rawMaterial = new THREE.PointsMaterial({
+      color: 0xff4444,
+      size: 0.02,
+      opacity: 0.5,
+      transparent: true
+    });
+    const rawPoints = new THREE.Points(rawGeometry, rawMaterial);
+    this.imuPlotGroup.add(rawPoints);
+    
+    // Calibrated points (green)
+    const calMaterial = new THREE.PointsMaterial({
+      color: 0x44ff44,
+      size: 0.025,
+      opacity: 0.8,
+      transparent: true
+    });
+    const calPoints = new THREE.Points(calGeometry, calMaterial);
+    this.imuPlotGroup.add(calPoints);
+    
+    // Add center sphere (origin)
+    const centerGeometry = new THREE.SphereGeometry(0.03, 16, 16);
+    const centerMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+    const center = new THREE.Mesh(centerGeometry, centerMaterial);
+    this.imuPlotGroup.add(center);
+    
+    // Add reference sphere showing expected 1g magnitude
+    const expectedMag = 1.0 * scale;
+    const sphereGeometry = new THREE.SphereGeometry(expectedMag, 32, 32);
+    const sphereMaterial = new THREE.MeshBasicMaterial({
+      color: 0x4488ff,
+      wireframe: true,
+      opacity: 0.3,
+      transparent: true
+    });
+    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    this.imuPlotGroup.add(sphere);
+    
+    // Add axes
+    const axesHelper = new THREE.AxesHelper(2.0);
+    this.imuPlotGroup.add(axesHelper);
+    
+    // Add calibration center marker (where the raw data is centered)
+    const calCenterGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+    const calCenterMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0xff00ff,
+      opacity: 0.7,
+      transparent: true
+    });
+    const calCenter = new THREE.Mesh(calCenterGeometry, calCenterMaterial);
+    calCenter.position.set(
+      calibration.offsetX * scale,
+      calibration.offsetY * scale,
+      calibration.offsetZ * scale
+    );
+    this.imuPlotGroup.add(calCenter);
+    
+    this.scene.add(this.imuPlotGroup);
+    
+    // Adjust camera for better view
+    this.camera.position.set(3, 3, 3);
+    this.camera.lookAt(0, 0, 0);
+  }
+  
+  /**
+   * Check if IMU plot is currently visible
+   */
+  isIMUPlotVisible(): boolean {
+    return this.showingIMUPlot;
+  }
+  
+  /**
+   * Check if Mag plot is currently visible
+   */
+  isMagPlotVisible(): boolean {
+    return this.showingMagPlot;
+  }
+  
+  /**
+   * Refresh IMU plot with new calibration (if plot is visible)
+   * Call this after changing calibration values
+   */
+  refreshIMUPlot(
+    samples: { ax: number; ay: number; az: number }[],
+    calibration: { offsetX: number; offsetY: number; offsetZ: number }
+  ): void {
+    if (!this.showingIMUPlot) return;
+    
+    // Remove current plot
+    if (this.imuPlotGroup) {
+      this.scene.remove(this.imuPlotGroup);
+      this.imuPlotGroup = null;
+    }
+    this.showingIMUPlot = false;
+    
+    // Re-create with new calibration (toggleIMUPlot will create since showingIMUPlot is false)
+    this.toggleIMUPlot(samples, calibration);
+  }
+  
+  /**
+   * Refresh Mag plot with new calibration (if plot is visible)
+   * Call this after changing calibration values
+   */
+  refreshMagPlot(
+    samples: MAGData[],
+    calibration: { offsetX: number; offsetY: number; offsetZ: number }
+  ): void {
+    if (!this.showingMagPlot) return;
+    
+    // Remove current plot
+    if (this.magPlotGroup) {
+      this.scene.remove(this.magPlotGroup);
+      this.magPlotGroup = null;
+    }
+    this.showingMagPlot = false;
+    
+    // Re-create with new calibration
+    this.toggleMagPlot(samples, calibration);
+  }
+  
+  /**
    * Toggle sensor vector visualization
    */
   toggleSensorVectors(show: boolean): void {
@@ -540,6 +731,45 @@ export class OrientationViewer {
     this.sensorVectorsGroup.visible = show;
     if (this.magWorldArrow) {
       this.magWorldArrow.visible = show;
+    }
+  }
+  
+  /**
+   * Toggle linear acceleration vector (body frame, gravity removed)
+   */
+  toggleLinearAccel(show: boolean): void {
+    this.showLinearAccel = show;
+    if (this.linearAccelArrow) {
+      this.linearAccelArrow.visible = show;
+    }
+    if (this.linearAccelLabel) {
+      this.linearAccelLabel.visible = show;
+    }
+  }
+  
+  /**
+   * Toggle earth acceleration vector (world frame, gravity removed)
+   */
+  toggleEarthAccel(show: boolean): void {
+    this.showEarthAccel = show;
+    if (this.earthAccelArrow) {
+      this.earthAccelArrow.visible = show;
+    }
+    if (this.earthAccelLabel) {
+      this.earthAccelLabel.visible = show;
+    }
+  }
+  
+  /**
+   * Toggle AHRS gravity vector (body frame, estimated from orientation)
+   */
+  toggleGravity(show: boolean): void {
+    this.showGravity = show;
+    if (this.gravityArrow) {
+      this.gravityArrow.visible = show;
+    }
+    if (this.gravityLabel) {
+      this.gravityLabel.visible = show;
     }
   }
   
@@ -706,6 +936,165 @@ export class OrientationViewer {
         this.gyroArrowZ = createCurvedArrow('z', gzLocal, COLORS.GYRO_Z, { radius: 0.9 });
         this.sensorVectorsGroup.add(this.gyroArrowZ);
       }
+    }
+  }
+  
+  /**
+   * Update linear acceleration, earth acceleration, and gravity vectors
+   * 
+   * @param linearAccel Linear acceleration in body frame (gravity removed), in g
+   * @param earthAccel Earth-frame acceleration in NWU (gravity removed), in g
+   * @param gravity AHRS-estimated gravity direction in body frame (unit vector)
+   */
+  updateAccelerationVectors(
+    linearAccel: { x: number; y: number; z: number } | null,
+    earthAccel: { x: number; y: number; z: number } | null,
+    gravity?: { x: number; y: number; z: number } | null
+  ): void {
+    // Clean up old arrows
+    if (this.linearAccelArrow) {
+      this.sensorVectorsGroup.remove(this.linearAccelArrow);
+      this.linearAccelArrow.dispose();
+      this.linearAccelArrow = null;
+    }
+    if (this.linearAccelLabel) {
+      this.sensorVectorsGroup.remove(this.linearAccelLabel);
+      this.disposeLabel(this.linearAccelLabel);
+      this.linearAccelLabel = null;
+    }
+    if (this.earthAccelArrow) {
+      this.scene.remove(this.earthAccelArrow);
+      this.earthAccelArrow.dispose();
+      this.earthAccelArrow = null;
+    }
+    if (this.earthAccelLabel) {
+      this.scene.remove(this.earthAccelLabel);
+      this.disposeLabel(this.earthAccelLabel);
+      this.earthAccelLabel = null;
+    }
+    if (this.gravityArrow) {
+      this.scene.remove(this.gravityArrow);  // Remove from scene, not sensorVectorsGroup
+      this.gravityArrow.dispose();
+      this.gravityArrow = null;
+    }
+    if (this.gravityLabel) {
+      this.scene.remove(this.gravityLabel);  // Remove from scene, not sensorVectorsGroup
+      this.disposeLabel(this.gravityLabel);
+      this.gravityLabel = null;
+    }
+    
+    // =========================================================================
+    // Coordinate Transforms for Viewer
+    // =========================================================================
+    
+    // Body frame → Three.js local (attached to device)
+    // Body: X=West, Y=Up, Z=North
+    // Three.js local: X=right(-West), Y=up, Z=back(-North when at identity)
+    // Transform: Three.js = [-Body_X, +Body_Y, -Body_Z]
+    const bodyToThreeLocal = (v: { x: number; y: number; z: number }) => {
+      return new THREE.Vector3(-v.x, v.y, -v.z);
+    };
+    
+    // NWU world frame → Three.js world
+    // NWU: X=North, Y=West, Z=Up
+    // Three.js world: X=East, Y=Up, Z=South (camera looks at -Z for North)
+    // Transform: Three.js = [-NWU_Y, +NWU_Z, -NWU_X]
+    const nwuToThreeWorld = (v: { x: number; y: number; z: number }) => {
+      return new THREE.Vector3(-v.y, v.z, -v.x);
+    };
+    
+    // =========================================================================
+    // Linear Acceleration (body frame, gravity removed)
+    // =========================================================================
+    // Attached to device, shows acceleration relative to the device's orientation
+    if (linearAccel && this.showLinearAccel) {
+      const linearLocal = bodyToThreeLocal(linearAccel);
+      const linearMag = linearLocal.length();
+      
+      // Only show if significant acceleration (> 0.02g threshold)
+      if (linearMag > 0.02) {
+        const linearDir = linearLocal.clone().normalize();
+        const linearArrowLength = Math.min(linearMag * 3.0, 2.0);  // Scale and cap length
+        
+        this.linearAccelArrow = new THREE.ArrowHelper(
+          linearDir,
+          new THREE.Vector3(0, 0, 0),
+          linearArrowLength,
+          0xff69b4,  // Pink (Hot Pink)
+          0.15,
+          0.08
+        );
+        this.sensorVectorsGroup.add(this.linearAccelArrow);
+        
+        // Add "L" label
+        this.linearAccelLabel = this.createTextLabel('L', '#ff69b4');
+        this.linearAccelLabel.position.copy(linearDir.clone().multiplyScalar(linearArrowLength + 0.15));
+        this.sensorVectorsGroup.add(this.linearAccelLabel);
+      }
+    }
+    
+    // =========================================================================
+    // Earth Acceleration (NWU world frame, gravity removed)
+    // =========================================================================
+    // Fixed in world space, shows actual motion direction regardless of device orientation
+    if (earthAccel && this.showEarthAccel) {
+      const earthWorld = nwuToThreeWorld(earthAccel);
+      const earthMag = earthWorld.length();
+      
+      // Only show if significant acceleration (> 0.02g threshold)
+      if (earthMag > 0.02) {
+        const earthDir = earthWorld.clone().normalize();
+        const earthArrowLength = Math.min(earthMag * 3.0, 2.0);  // Scale and cap length
+        
+        this.earthAccelArrow = new THREE.ArrowHelper(
+          earthDir,
+          new THREE.Vector3(0, 0, 0),
+          earthArrowLength,
+          0xffa500,  // Orange
+          0.15,
+          0.08
+        );
+        this.scene.add(this.earthAccelArrow);  // Add to scene, not device group
+        
+        // Add "E" label
+        this.earthAccelLabel = this.createTextLabel('E', '#ffa500');
+        this.earthAccelLabel.position.copy(earthDir.clone().multiplyScalar(earthArrowLength + 0.15));
+        this.scene.add(this.earthAccelLabel);
+      }
+    }
+    
+    // =========================================================================
+    // AHRS Gravity Vector (world frame - always points up)
+    // =========================================================================
+    // Shows the AHRS estimate of gravity direction in world frame.
+    // This is always "up" in world coordinates (the direction opposite to gravity).
+    // When stationary and level, G and Gv both point up in world.
+    // When device tilts, G (raw accel) tilts with device, but Gv stays pointing up.
+    // 
+    // The gravity vector IS the world up direction. We display it directly in
+    // world frame (scene), not in the rotating sensorVectorsGroup.
+    if (gravity && this.showGravity) {
+      // Gravity from AHRS is in body frame - but we want world frame.
+      // In world frame, gravity reaction always points UP = [0, 0, +1] in NWU.
+      // Convert NWU world up to Three.js world coordinates.
+      const gravWorld = nwuToThreeWorld({ x: 0, y: 0, z: 1 });  // NWU up = [0,0,1]
+      const gravDir = gravWorld.normalize();
+      const gravArrowLength = 1.5;
+      
+      this.gravityArrow = new THREE.ArrowHelper(
+        gravDir,
+        new THREE.Vector3(0, 0, 0),
+        gravArrowLength,
+        0x00ffff,  // Cyan - distinct from yellow raw accel
+        0.15,
+        0.08
+      );
+      this.scene.add(this.gravityArrow);  // Add to scene, NOT sensorVectorsGroup
+      
+      // Add "Gv" label (Gravity Vector from AHRS)
+      this.gravityLabel = this.createTextLabel('Gv', '#00ffff');
+      this.gravityLabel.position.copy(gravDir.clone().multiplyScalar(gravArrowLength + 0.15));
+      this.scene.add(this.gravityLabel);  // Add to scene, NOT sensorVectorsGroup
     }
   }
   

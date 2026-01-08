@@ -12,6 +12,21 @@ import { calculateHardIronCalibration, evaluateCalibrationQuality } from './magC
 import { calculateIMUCalibration, analyzeIMUData } from './imuCalibration';
 import { fitEllipsoid, formatSoftIronMatrix } from './ellipsoidFit';
 import { calibrate6Position, detectStationarySegments, selectBestSegments, formatOrientationStatus } from './accelCalibration6Pos';
+import { 
+  onSphereFitCalculated, 
+  onSphereFitApplied,
+  onEllipsoidFitCalculated, 
+  onEllipsoidFitApplied,
+  onIMUCalibrationCalculated,
+  onIMUCalibrationApplied,
+  on6PosCalibrationCalculated,
+  on6PosGyroBiasApplied,
+  on6PosAccelBiasApplied,
+  on6PosAllBiasApplied,
+  on6PosFullMatrixApplied,
+  onAxisRemapChanged,
+  updateSummaryDisplay
+} from './calibrationExecutive';
 import type { MagCalibration, IMUCalibration, AxisRemap } from './types';
 import { debug } from './constants';
 
@@ -131,6 +146,10 @@ export function handleCalculateCalibration(): void {
   elements.calibrationResult.innerHTML = html;
   elements.calibrationResult.classList.add('visible');
   
+  // Notify calibration executive of sphere fit calculation
+  onSphereFitCalculated(state.currentFileName || 'unknown');
+  updateSummaryDisplay();
+  
   debug.log('Calibration calculated:', state.lastMagCalibration);
   debug.log('Quality:', quality);
 }
@@ -147,6 +166,11 @@ export function applyCalibration(): void {
   elements.magOffsetZ.value = state.lastMagCalibration.offsetZ.toFixed(4);
   
   handleMagCalChange();
+  refreshMagPlotIfVisible();
+  
+  // Notify calibration executive
+  onSphereFitApplied();
+  updateSummaryDisplay();
 }
 
 /**
@@ -163,6 +187,58 @@ export function handleShowMagPlot(): void {
   const offsetZ = parseFloat(elements.magOffsetZ.value) || 0;
   
   state.viewer.toggleMagPlot(magSamples, { offsetX, offsetY, offsetZ });
+}
+
+/**
+ * Show 3D scatter plot of IMU accelerometer data
+ */
+export function handleShowIMUPlot(): void {
+  if (!state.dataset || !state.viewer) return;
+  
+  const elements = getElements();
+  const imuSamples = getIMUReadings(state.dataset);
+  
+  const offsetX = parseFloat(elements.accelOffsetX.value) || 0;
+  const offsetY = parseFloat(elements.accelOffsetY.value) || 0;
+  const offsetZ = parseFloat(elements.accelOffsetZ.value) || 0;
+  
+  state.viewer.toggleIMUPlot(imuSamples, { offsetX, offsetY, offsetZ });
+}
+
+/**
+ * Refresh IMU 3D plot if it's currently visible
+ * Call this after changing calibration values
+ */
+export function refreshIMUPlotIfVisible(): void {
+  if (!state.dataset || !state.viewer) return;
+  if (!state.viewer.isIMUPlotVisible()) return;
+  
+  const elements = getElements();
+  const imuSamples = getIMUReadings(state.dataset);
+  
+  const offsetX = parseFloat(elements.accelOffsetX.value) || 0;
+  const offsetY = parseFloat(elements.accelOffsetY.value) || 0;
+  const offsetZ = parseFloat(elements.accelOffsetZ.value) || 0;
+  
+  state.viewer.refreshIMUPlot(imuSamples, { offsetX, offsetY, offsetZ });
+}
+
+/**
+ * Refresh Mag 3D plot if it's currently visible
+ * Call this after changing calibration values
+ */
+export function refreshMagPlotIfVisible(): void {
+  if (!state.dataset || !state.viewer) return;
+  if (!state.viewer.isMagPlotVisible()) return;
+  
+  const elements = getElements();
+  const magSamples = getMAGReadings(state.dataset);
+  
+  const offsetX = parseFloat(elements.magOffsetX.value) || 0;
+  const offsetY = parseFloat(elements.magOffsetY.value) || 0;
+  const offsetZ = parseFloat(elements.magOffsetZ.value) || 0;
+  
+  state.viewer.refreshMagPlot(magSamples, { offsetX, offsetY, offsetZ });
 }
 
 // ============================================================================
@@ -235,6 +311,10 @@ export function handleCalculateIMUCalibration(): void {
   elements.imuCalibrationResult.innerHTML = html;
   elements.imuCalibrationResult.classList.add('visible');
   
+  // Notify calibration executive of IMU calibration calculation
+  onIMUCalibrationCalculated(state.currentFileName || 'unknown');
+  updateSummaryDisplay();
+  
   debug.log('IMU Calibration calculated:', state.lastIMUCalibration);
 }
 
@@ -253,6 +333,10 @@ export function applyIMUCalibration(): void {
   elements.accelOffsetZ.value = state.lastIMUCalibration.accelOffsetZ.toFixed(4);
   
   handleIMUCalChange();
+  
+  // Notify calibration executive
+  onIMUCalibrationApplied();
+  updateSummaryDisplay();
 }
 
 /**
@@ -354,6 +438,10 @@ export function handleCalculateEllipsoid(): void {
     elements.calibrationResult.innerHTML = html;
     elements.calibrationResult.classList.add('visible');
     
+    // Notify calibration executive of ellipsoid fit calculation
+    onEllipsoidFitCalculated(state.currentFileName || 'unknown');
+    updateSummaryDisplay();
+    
     debug.log('Ellipsoid Calibration:', result);
     
   } catch (error) {
@@ -388,6 +476,11 @@ export function applyEllipsoidCalibration(): void {
   
   // Also apply hard iron via normal mag cal change
   handleMagCalChange();
+  refreshMagPlotIfVisible();
+  
+  // Notify calibration executive
+  onEllipsoidFitApplied();
+  updateSummaryDisplay();
   
   debug.log('Applied ellipsoid calibration (hard iron + soft iron)');
 }
@@ -463,12 +556,17 @@ export function handleCalculate6PosCalibration(): void {
     
     // Build result HTML
     let html = '<div class="calibration-values">';
-    html += `<strong>6-Position Accel Calibration</strong><br><br>`;
+    html += `<strong>6-Position IMU Calibration</strong><br><br>`;
     
-    html += `<strong>Bias (g):</strong><br>`;
+    html += `<strong>Accel Bias (g):</strong><br>`;
     html += `X: ${result.bias.x.toFixed(6)}<br>`;
     html += `Y: ${result.bias.y.toFixed(6)}<br>`;
     html += `Z: ${result.bias.z.toFixed(6)}<br><br>`;
+    
+    html += `<strong>Gyro Bias (deg/s):</strong><br>`;
+    html += `X: ${result.gyroBias.x.toFixed(4)} ± ${result.gyroBiasStdDev.x.toFixed(4)}<br>`;
+    html += `Y: ${result.gyroBias.y.toFixed(4)} ± ${result.gyroBiasStdDev.y.toFixed(4)}<br>`;
+    html += `Z: ${result.gyroBias.z.toFixed(4)} ± ${result.gyroBiasStdDev.z.toFixed(4)}<br><br>`;
     
     html += `<strong>Cross-Axis Coupling:</strong><br>`;
     const crossAxis = result.crossAxis;
@@ -479,8 +577,12 @@ export function handleCalculate6PosCalibration(): void {
     html += `<strong>Residual RMS:</strong> ${result.residualRms.toFixed(6)} g<br>`;
     
     html += `</div>`;
-    html += `<button class="apply-btn" onclick="window.apply6PosCalibration()">Apply Bias Only</button>`;
-    html += `<button class="apply-btn" onclick="window.apply6PosFullCalibration()" style="margin-left: 0.5rem;">Apply Full Matrix</button>`;
+    html += `<div class="apply-btn-group">`;
+    html += `<button class="apply-btn" onclick="window.apply6PosGyroBias()">Apply Gyro Bias</button>`;
+    html += `<button class="apply-btn" onclick="window.apply6PosAccelBias()">Apply Accel Bias</button>`;
+    html += `<button class="apply-btn" onclick="window.apply6PosAllBias()">Apply All Bias</button>`;
+    html += `<button class="apply-btn" onclick="window.apply6PosFullCalibration()">Apply Full Matrix</button>`;
+    html += `</div>`;
     
     elements.sixPosStatus.innerHTML = html;
     elements.sixPosStatus.classList.add('visible');
@@ -494,6 +596,10 @@ export function handleCalculate6PosCalibration(): void {
     matrixHtml += '</table>';
     elements.accelScaleMatrixDisplay.innerHTML = matrixHtml;
     
+    // Notify calibration executive of 6-pos calibration calculation
+    on6PosCalibrationCalculated(state.currentFileName || 'unknown');
+    updateSummaryDisplay();
+    
     debug.log('6-Position Calibration:', result);
     
   } catch (error) {
@@ -504,33 +610,97 @@ export function handleCalculate6PosCalibration(): void {
 }
 
 /**
- * Apply 6-position calibration (bias only for simple UI)
+ * Apply 6-position gyro bias only
  */
-export function apply6PosCalibration(): void {
+export function apply6PosGyroBias(): void {
   if (!state.lastAccel6PosCalibration) return;
   
   const elements = getElements();
+  
+  // Apply gyro bias only
+  elements.gyroBiasX.value = state.lastAccel6PosCalibration.gyroBias.x.toFixed(4);
+  elements.gyroBiasY.value = state.lastAccel6PosCalibration.gyroBias.y.toFixed(4);
+  elements.gyroBiasZ.value = state.lastAccel6PosCalibration.gyroBias.z.toFixed(4);
+  
+  handleIMUCalChange();
+  refreshIMUPlotIfVisible();
+  
+  // Notify calibration executive
+  on6PosGyroBiasApplied();
+  updateSummaryDisplay();
+  
+  debug.log('Applied 6-pos gyro bias only');
+}
+
+/**
+ * Apply 6-position accel bias only
+ */
+export function apply6PosAccelBias(): void {
+  if (!state.lastAccel6PosCalibration) return;
+  
+  const elements = getElements();
+  
+  // Apply accel bias only
   elements.accelOffsetX.value = state.lastAccel6PosCalibration.bias.x.toFixed(6);
   elements.accelOffsetY.value = state.lastAccel6PosCalibration.bias.y.toFixed(6);
   elements.accelOffsetZ.value = state.lastAccel6PosCalibration.bias.z.toFixed(6);
   
   handleIMUCalChange();
+  refreshIMUPlotIfVisible();
   
-  debug.log('Applied 6-pos calibration (bias only)');
+  // Notify calibration executive
+  on6PosAccelBiasApplied();
+  updateSummaryDisplay();
+  
+  debug.log('Applied 6-pos accel bias only');
+}
+
+/**
+ * Apply 6-position all bias (accel + gyro)
+ */
+export function apply6PosAllBias(): void {
+  if (!state.lastAccel6PosCalibration) return;
+  
+  const elements = getElements();
+  
+  // Apply accel bias
+  elements.accelOffsetX.value = state.lastAccel6PosCalibration.bias.x.toFixed(6);
+  elements.accelOffsetY.value = state.lastAccel6PosCalibration.bias.y.toFixed(6);
+  elements.accelOffsetZ.value = state.lastAccel6PosCalibration.bias.z.toFixed(6);
+  
+  // Apply gyro bias
+  elements.gyroBiasX.value = state.lastAccel6PosCalibration.gyroBias.x.toFixed(4);
+  elements.gyroBiasY.value = state.lastAccel6PosCalibration.gyroBias.y.toFixed(4);
+  elements.gyroBiasZ.value = state.lastAccel6PosCalibration.gyroBias.z.toFixed(4);
+  
+  handleIMUCalChange();
+  refreshIMUPlotIfVisible();
+  
+  // Notify calibration executive
+  on6PosAllBiasApplied();
+  updateSummaryDisplay();
+  
+  debug.log('Applied 6-pos all bias (accel + gyro)');
 }
 
 /**
  * Apply 6-position calibration with full scale matrix
+ * Includes accel bias, accel scale matrix, and gyro bias
  */
 export function apply6PosFullCalibration(): void {
   if (!state.lastAccel6PosCalibration) return;
   
   const elements = getElements();
   
-  // Apply bias to UI fields
+  // Apply accel bias to UI fields
   elements.accelOffsetX.value = state.lastAccel6PosCalibration.bias.x.toFixed(6);
   elements.accelOffsetY.value = state.lastAccel6PosCalibration.bias.y.toFixed(6);
   elements.accelOffsetZ.value = state.lastAccel6PosCalibration.bias.z.toFixed(6);
+  
+  // Apply gyro bias to UI fields
+  elements.gyroBiasX.value = state.lastAccel6PosCalibration.gyroBias.x.toFixed(4);
+  elements.gyroBiasY.value = state.lastAccel6PosCalibration.gyroBias.y.toFixed(4);
+  elements.gyroBiasZ.value = state.lastAccel6PosCalibration.gyroBias.z.toFixed(4);
   
   // Store the full calibration in state for both AHRS implementations
   state.accelScaleMatrix = state.lastAccel6PosCalibration.scaleMatrixInverse;
@@ -549,8 +719,13 @@ export function apply6PosFullCalibration(): void {
   }
   
   handleIMUCalChange();
+  refreshIMUPlotIfVisible();
   
-  debug.log('Applied 6-pos full calibration to both AHRS with scale matrix:', state.lastAccel6PosCalibration.scaleMatrixInverse);
+  // Notify calibration executive
+  on6PosFullMatrixApplied();
+  updateSummaryDisplay();
+  
+  debug.log('Applied 6-pos full calibration (accel + gyro bias + scale matrix):', state.lastAccel6PosCalibration.scaleMatrixInverse);
 }
 
 // ============================================================================
@@ -590,6 +765,11 @@ export function handleAxisRemapChange(): void {
     updateDisplay(state.playbackIndex);
   }
   
+  // Notify calibration executive of axis remap changes
+  onAxisRemapChanged('imu');
+  onAxisRemapChanged('mag');
+  updateSummaryDisplay();
+  
   debug.log('IMU axis remap:', imuRemap);
   debug.log('MAG axis remap:', magRemap);
 }
@@ -602,5 +782,7 @@ export function handleAxisRemapChange(): void {
 (window as unknown as { applyCalibration: () => void }).applyCalibration = applyCalibration;
 (window as unknown as { applyIMUCalibration: () => void }).applyIMUCalibration = applyIMUCalibration;
 (window as unknown as { applyEllipsoidCalibration: () => void }).applyEllipsoidCalibration = applyEllipsoidCalibration;
-(window as unknown as { apply6PosCalibration: () => void }).apply6PosCalibration = apply6PosCalibration;
+(window as unknown as { apply6PosGyroBias: () => void }).apply6PosGyroBias = apply6PosGyroBias;
+(window as unknown as { apply6PosAccelBias: () => void }).apply6PosAccelBias = apply6PosAccelBias;
+(window as unknown as { apply6PosAllBias: () => void }).apply6PosAllBias = apply6PosAllBias;
 (window as unknown as { apply6PosFullCalibration: () => void }).apply6PosFullCalibration = apply6PosFullCalibration;

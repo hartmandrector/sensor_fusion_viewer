@@ -42,8 +42,14 @@ export interface StationarySegment {
   /** Average acceleration during segment */
   avgAccel: { x: number; y: number; z: number };
   
-  /** Standard deviation during segment */
+  /** Standard deviation of acceleration during segment */
   stdDev: { x: number; y: number; z: number };
+  
+  /** Average gyroscope reading during segment (deg/s) - this IS the gyro bias */
+  avgGyro: { x: number; y: number; z: number };
+  
+  /** Standard deviation of gyroscope during segment */
+  gyroStdDev: { x: number; y: number; z: number };
   
   /** Detected dominant axis orientation */
   orientation: AxisOrientation;
@@ -65,8 +71,14 @@ export interface AccelCalibration6PosResult {
   /** Inverse of scale matrix (for applying correction) */
   scaleMatrixInverse: number[][];
   
-  /** Bias vector */
+  /** Accel bias vector */
   bias: { x: number; y: number; z: number };
+  
+  /** Gyro bias vector (deg/s) - calculated from stationary segments */
+  gyroBias: { x: number; y: number; z: number };
+  
+  /** Gyro bias standard deviation (deg/s) - quality indicator */
+  gyroBiasStdDev: { x: number; y: number; z: number };
   
   /** Scale factors extracted from diagonal */
   scaleFactor: { x: number; y: number; z: number };
@@ -311,6 +323,7 @@ function detectOrientation(avgAccel: { x: number; y: number; z: number }): {
 /**
  * Detect stationary segments in accelerometer data
  * Uses gyroscope data to detect when device is still
+ * Also calculates gyro bias from stationary segments
  */
 export function detectStationarySegments(
   accelData: AccelSample[],
@@ -324,8 +337,9 @@ export function detectStationarySegments(
   }
   
   // Interpolate gyro data to match accel timestamps
+  // Store both magnitude and actual values for gyro bias calculation
   let gyroIndex = 0;
-  const gyroMagnitudes: number[] = [];
+  const interpolatedGyro: { x: number; y: number; z: number; magnitude: number }[] = [];
   
   for (const accel of accelData) {
     // Find closest gyro sample
@@ -336,14 +350,14 @@ export function detectStationarySegments(
     
     const gyro = gyroData[Math.min(gyroIndex, gyroData.length - 1)];
     const magnitude = Math.sqrt(gyro.x ** 2 + gyro.y ** 2 + gyro.z ** 2);
-    gyroMagnitudes.push(magnitude);
+    interpolatedGyro.push({ x: gyro.x, y: gyro.y, z: gyro.z, magnitude });
   }
   
   // Find stationary segments (gyro below threshold)
   let segmentStart = -1;
   
   for (let i = 0; i < accelData.length; i++) {
-    const isStationary = gyroMagnitudes[i] < config.gyroThreshold;
+    const isStationary = interpolatedGyro[i].magnitude < config.gyroThreshold;
     
     if (isStationary && segmentStart < 0) {
       // Start new segment
@@ -368,29 +382,50 @@ export function detectStationarySegments(
       return;  // Too short
     }
     
-    // Calculate average and std dev
-    let sumX = 0, sumY = 0, sumZ = 0;
+    // Calculate accel average and std dev
+    let sumAx = 0, sumAy = 0, sumAz = 0;
     for (let i = start; i <= end; i++) {
-      sumX += accelData[i].x;
-      sumY += accelData[i].y;
-      sumZ += accelData[i].z;
+      sumAx += accelData[i].x;
+      sumAy += accelData[i].y;
+      sumAz += accelData[i].z;
     }
-    const avgX = sumX / sampleCount;
-    const avgY = sumY / sampleCount;
-    const avgZ = sumZ / sampleCount;
+    const avgAx = sumAx / sampleCount;
+    const avgAy = sumAy / sampleCount;
+    const avgAz = sumAz / sampleCount;
     
-    let varX = 0, varY = 0, varZ = 0;
+    let varAx = 0, varAy = 0, varAz = 0;
     for (let i = start; i <= end; i++) {
-      varX += (accelData[i].x - avgX) ** 2;
-      varY += (accelData[i].y - avgY) ** 2;
-      varZ += (accelData[i].z - avgZ) ** 2;
+      varAx += (accelData[i].x - avgAx) ** 2;
+      varAy += (accelData[i].y - avgAy) ** 2;
+      varAz += (accelData[i].z - avgAz) ** 2;
     }
-    const stdX = Math.sqrt(varX / sampleCount);
-    const stdY = Math.sqrt(varY / sampleCount);
-    const stdZ = Math.sqrt(varZ / sampleCount);
+    const stdAx = Math.sqrt(varAx / sampleCount);
+    const stdAy = Math.sqrt(varAy / sampleCount);
+    const stdAz = Math.sqrt(varAz / sampleCount);
+    
+    // Calculate gyro average and std dev (this is the gyro bias for this segment)
+    let sumGx = 0, sumGy = 0, sumGz = 0;
+    for (let i = start; i <= end; i++) {
+      sumGx += interpolatedGyro[i].x;
+      sumGy += interpolatedGyro[i].y;
+      sumGz += interpolatedGyro[i].z;
+    }
+    const avgGx = sumGx / sampleCount;
+    const avgGy = sumGy / sampleCount;
+    const avgGz = sumGz / sampleCount;
+    
+    let varGx = 0, varGy = 0, varGz = 0;
+    for (let i = start; i <= end; i++) {
+      varGx += (interpolatedGyro[i].x - avgGx) ** 2;
+      varGy += (interpolatedGyro[i].y - avgGy) ** 2;
+      varGz += (interpolatedGyro[i].z - avgGz) ** 2;
+    }
+    const stdGx = Math.sqrt(varGx / sampleCount);
+    const stdGy = Math.sqrt(varGy / sampleCount);
+    const stdGz = Math.sqrt(varGz / sampleCount);
     
     // Detect orientation
-    const { orientation, angleFromAxis } = detectOrientation({ x: avgX, y: avgY, z: avgZ });
+    const { orientation, angleFromAxis } = detectOrientation({ x: avgAx, y: avgAy, z: avgAz });
     
     // Check validity
     const isValid = angleFromAxis <= config.maxAngleFromAxis;
@@ -399,8 +434,10 @@ export function detectStationarySegments(
       startIndex: start,
       endIndex: end,
       duration,
-      avgAccel: { x: avgX, y: avgY, z: avgZ },
-      stdDev: { x: stdX, y: stdY, z: stdZ },
+      avgAccel: { x: avgAx, y: avgAy, z: avgAz },
+      stdDev: { x: stdAx, y: stdAy, z: stdAz },
+      avgGyro: { x: avgGx, y: avgGy, z: avgGz },
+      gyroStdDev: { x: stdGx, y: stdGy, z: stdGz },
       orientation,
       angleFromAxis,
       sampleCount,
@@ -601,10 +638,49 @@ export function calibrate6Position(
     orientationQuality * scaleQuality * residualQuality * 100
   ));
   
+  // Calculate gyro bias from all stationary segments
+  // Weight by number of samples (variance-weighted average)
+  let totalSamples = 0;
+  let sumGx = 0, sumGy = 0, sumGz = 0;
+  let sumVarGx = 0, sumVarGy = 0, sumVarGz = 0;
+  
+  for (const [, segment] of positions) {
+    const weight = segment.sampleCount;
+    totalSamples += weight;
+    sumGx += segment.avgGyro.x * weight;
+    sumGy += segment.avgGyro.y * weight;
+    sumGz += segment.avgGyro.z * weight;
+    // Accumulate variance (assuming independent segments)
+    sumVarGx += (segment.gyroStdDev.x ** 2) * weight;
+    sumVarGy += (segment.gyroStdDev.y ** 2) * weight;
+    sumVarGz += (segment.gyroStdDev.z ** 2) * weight;
+  }
+  
+  const gyroBias = {
+    x: totalSamples > 0 ? sumGx / totalSamples : 0,
+    y: totalSamples > 0 ? sumGy / totalSamples : 0,
+    z: totalSamples > 0 ? sumGz / totalSamples : 0
+  };
+  
+  // Standard deviation of the combined estimate
+  const gyroBiasStdDev = {
+    x: totalSamples > 0 ? Math.sqrt(sumVarGx / totalSamples) : 0,
+    y: totalSamples > 0 ? Math.sqrt(sumVarGy / totalSamples) : 0,
+    z: totalSamples > 0 ? Math.sqrt(sumVarGz / totalSamples) : 0
+  };
+  
+  // Check gyro bias quality
+  const avgGyroBiasMag = Math.sqrt(gyroBias.x ** 2 + gyroBias.y ** 2 + gyroBias.z ** 2);
+  if (avgGyroBiasMag > 5) {
+    warnings.push(`Large gyro bias detected (${avgGyroBiasMag.toFixed(2)} deg/s) - sensor may be faulty`);
+  }
+  
   return {
     scaleMatrix,
     scaleMatrixInverse,
     bias,
+    gyroBias,
+    gyroBiasStdDev,
     scaleFactor,
     crossAxis,
     segments,

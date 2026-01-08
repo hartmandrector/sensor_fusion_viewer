@@ -1,7 +1,11 @@
 /**
  * FusionAhrs - Chapter 7 AHRS Implementation
  * 
- * Port of x-io Fusion library's improved AHRS algorithm with:
+ * DIRECT PORT of x-io Fusion library's improved AHRS algorithm.
+ * This file contains NO coordinate transforms - it operates purely in NWU.
+ * All coordinate transforms happen in the adapter layer (FusionAhrsAdapter.ts).
+ * 
+ * Features:
  * - Acceleration rejection for high-G environments
  * - Magnetic distortion rejection
  * - Gyroscope bias estimation
@@ -10,10 +14,20 @@
  * Based on: Madgwick, S. O. H. (2020). "An efficient orientation filter for 
  * inertial and inertial/magnetic sensor arrays" - Chapter 7
  * 
- * Coordinate Convention: NWU (North-West-Up)
- * - X: North
- * - Y: West  
- * - Z: Up
+ * ============================================================================
+ * COORDINATE CONVENTION: NWU (North-West-Up)
+ * ============================================================================
+ * 
+ * All inputs and outputs use NWU convention:
+ *   X = North (forward)
+ *   Y = West (left)
+ *   Z = Up
+ * 
+ * Gravity: In Earth frame, gravity points DOWN, so [0, 0, -1].
+ *          At rest, accelerometer reads REACTION to gravity: [0, 0, +1].
+ * 
+ * This matches the original C reference implementation exactly.
+ * DO NOT add device-specific transforms here - use the adapter layer.
  * 
  * @license MIT
  */
@@ -183,6 +197,19 @@ function quaternionMultiplyVector(q: FusionQuaternion, v: FusionVector): FusionQ
  */
 function quaternionAdd(a: FusionQuaternion, b: FusionQuaternion): FusionQuaternion {
   return { w: a.w + b.w, x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+/**
+ * Multiply two quaternions: result = a * b
+ * Hamilton product for quaternion composition
+ */
+function quaternionMultiply(a: FusionQuaternion, b: FusionQuaternion): FusionQuaternion {
+  return {
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w
+  };
 }
 
 /**
@@ -412,6 +439,7 @@ export class FusionAhrs {
   
   /**
    * Update without magnetometer (6-DOF)
+   * Heading will drift freely; reset to 0 during initialization
    */
   updateNoMagnetometer(
     gyroscope: FusionVector,
@@ -419,6 +447,12 @@ export class FusionAhrs {
     deltaTime: number
   ): void {
     this.update(gyroscope, accelerometer, vectorZero(), deltaTime);
+    
+    // Zero heading during initialisation (matches reference implementation)
+    // This prevents arbitrary heading drift during the initial convergence period
+    if (this.initialising) {
+      this.setHeading(0);
+    }
   }
   
   // ===========================================================================
@@ -609,17 +643,21 @@ export class FusionAhrs {
     const q = this.quaternion;
     const a = this.accelerometer;
     
-    // Rotate accelerometer to Earth frame: R * a
-    // Using quaternion rotation: q * [0,a] * q'
-    const ax = 2 * ((0.5 - q.y * q.y - q.z * q.z) * a.x + (q.x * q.y - q.w * q.z) * a.y + (q.x * q.z + q.w * q.y) * a.z);
-    const ay = 2 * ((q.x * q.y + q.w * q.z) * a.x + (0.5 - q.x * q.x - q.z * q.z) * a.y + (q.y * q.z - q.w * q.x) * a.z);
-    const az = 2 * ((q.x * q.z - q.w * q.y) * a.x + (q.y * q.z + q.w * q.x) * a.y + (0.5 - q.x * q.x - q.y * q.y) * a.z);
+    // Rotate accelerometer to Earth frame using full rotation matrix
+    // This is R * a where R is the rotation matrix from body to Earth
+    const ax = 2 * ((q.w*q.w - 0.5 + q.x*q.x) * a.x + (q.x*q.y - q.w*q.z) * a.y + (q.x*q.z + q.w*q.y) * a.z);
+    const ay = 2 * ((q.x*q.y + q.w*q.z) * a.x + (q.w*q.w - 0.5 + q.y*q.y) * a.y + (q.y*q.z - q.w*q.x) * a.z);
+    const az = 2 * ((q.x*q.z - q.w*q.y) * a.x + (q.y*q.z + q.w*q.x) * a.y + (q.w*q.w - 0.5 + q.z*q.z) * a.z);
     
-    // Remove gravity (NWU: gravity is [0, 0, -1])
+    // Remove gravity in Earth frame
+    // NWU convention: gravity is [0, 0, -1] in Earth frame (down is -Z)
+    // At rest, accelerometer reads [0, 0, +1] (sensing reaction to gravity)
+    // After rotating to Earth frame, at rest we get [0, 0, +1]
+    // So we subtract 1.0 from Z to get zero linear acceleration at rest
     return {
       x: ax,
       y: ay,
-      z: az + 1.0  // Add 1g to remove gravity (which was -1g in Z)
+      z: az - 1.0
     };
   }
   
@@ -660,23 +698,31 @@ export class FusionAhrs {
   
   /**
    * Set heading (yaw) to a specific value while preserving roll and pitch
+   * 
+   * This applies a rotation to adjust the heading rather than reconstructing
+   * the quaternion, which is more robust during gimbal lock conditions.
+   * 
+   * @param heading Target heading in radians
    */
   setHeading(heading: number): void {
-    const euler = this.getEulerAngles();
+    const q = this.quaternion;
     
-    // Reconstruct quaternion with new heading
-    const cy = Math.cos(heading * 0.5);
-    const sy = Math.sin(heading * 0.5);
-    const cp = Math.cos(euler.pitch * 0.5);
-    const sp = Math.sin(euler.pitch * 0.5);
-    const cr = Math.cos(euler.roll * 0.5);
-    const sr = Math.sin(euler.roll * 0.5);
+    // Extract current yaw from quaternion
+    // yaw = atan2(w*z + x*y, 0.5 - y² - z²)
+    const yaw = Math.atan2(q.w * q.z + q.x * q.y, 0.5 - q.y * q.y - q.z * q.z);
     
-    this.quaternion = {
-      w: cr * cp * cy + sr * sp * sy,
-      x: sr * cp * cy - cr * sp * sy,
-      y: cr * sp * cy + sr * cp * sy,
-      z: cr * cp * sy - sr * sp * cy
+    // Calculate rotation needed: half of (current_yaw - target_heading)
+    const halfYawMinusHeading = 0.5 * (yaw - heading);
+    
+    // Create rotation quaternion around Z axis
+    const rotation: FusionQuaternion = {
+      w: Math.cos(halfYawMinusHeading),
+      x: 0,
+      y: 0,
+      z: -Math.sin(halfYawMinusHeading)
     };
+    
+    // Apply rotation: q_new = rotation * q_current
+    this.quaternion = quaternionNormalize(quaternionMultiply(rotation, this.quaternion));
   }
 }
