@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlySight Device GLB Exporter</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #1a1a2e;
+      color: white;
+    }
+    #container {
+      width: 100vw;
+      height: 80vh;
+    }
+    #controls {
+      padding: 20px;
+      text-align: center;
+    }
+    button {
+      padding: 15px 30px;
+      font-size: 18px;
+      background: #4a90d9;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin: 10px;
+    }
+    button:hover {
+      background: #357abd;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+  <div id="controls">
+    <button id="exportBtn">Download FlySight.glb</button>
+    <button id="exportGltfBtn">Download FlySight.gltf</button>
+    <div class="info">
+      Preview the device above, then click to export as GLB/GLTF.<br>
+      Dimensions: 5cm x 5cm x 1.5cm (scaled for visualization)
+    </div>
+  </div>
+
+  <!-- Import maps for Three.js modules -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+    // Device dimensions (matching viewer.ts)
+    const DEVICE_DIMENSIONS = {
+      WIDTH: 0.5,    // 5cm scaled
+      HEIGHT: 0.5,   // 5cm scaled
+      DEPTH: 0.15    // 1.5cm scaled
+    };
+
+    const SCREEN_INSET = 0.05;
+    const SCREEN_DEPTH_OFFSET = 0.001;
+
+    // Colors
+    const COLORS = {
+      DEVICE_BODY: 0x2a2a3a,
+      DEVICE_SCREEN: 0x111122,
+      LED: 0x00ff00,
+      USB: 0x444444,
+      AXIS_X: 0xff4444,
+      AXIS_Y: 0x44ff44,
+      AXIS_Z: 0x4444ff
+    };
+
+    // Scene setup
+    const container = document.getElementById('container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+
+    const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.set(1.5, 1, 1.5);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Lighting
+    const ambient = new THREE.AmbientLight(0x404040, 0.5);
+    scene.add(ambient);
+
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1);
+    mainLight.position.set(5, 5, 5);
+    scene.add(mainLight);
+
+    const fillLight = new THREE.DirectionalLight(0x4488ff, 0.3);
+    fillLight.position.set(-5, 0, -5);
+    scene.add(fillLight);
+
+    // Grid (for preview only, not exported)
+    const gridHelper = new THREE.GridHelper(2, 8, 0x444444, 0x222222);
+    gridHelper.position.y = -0.5;
+    gridHelper.name = 'grid'; // Mark for exclusion from export
+    scene.add(gridHelper);
+
+    // Create the FlySight device (this is the exportable part)
+    const deviceGroup = new THREE.Group();
+    deviceGroup.name = 'FlySight_Device';
+
+    // Main body - rectangular prism representing FlySight
+    const bodyGeometry = new THREE.BoxGeometry(
+      DEVICE_DIMENSIONS.WIDTH,
+      DEVICE_DIMENSIONS.HEIGHT,
+      DEVICE_DIMENSIONS.DEPTH
+    );
+    const bodyMaterial = new THREE.MeshStandardMaterial({ 
+      color: COLORS.DEVICE_BODY,
+      roughness: 0.5,
+      metalness: 0.3
+    });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.name = 'Body';
+    deviceGroup.add(body);
+
+    // LED indicator (top, toward front face which is at -Z)
+    const ledGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+    const ledMaterial = new THREE.MeshStandardMaterial({ 
+      color: COLORS.LED,
+      emissive: COLORS.LED,
+      emissiveIntensity: 0.5
+    });
+    const led = new THREE.Mesh(ledGeometry, ledMaterial);
+    led.name = 'LED';
+    led.position.set(0, DEVICE_DIMENSIONS.HEIGHT / 2 - 0.05, -DEVICE_DIMENSIONS.DEPTH / 2 - 0.01);
+    deviceGroup.add(led);
+
+    // USB port indicator (bottom, toward back which is at +Z)
+    const usbGeometry = new THREE.BoxGeometry(0.15, 0.05, 0.1);
+    const usbMaterial = new THREE.MeshStandardMaterial({ 
+      color: COLORS.USB,
+      roughness: 0.8,
+      metalness: 0.2
+    });
+    const usb = new THREE.Mesh(usbGeometry, usbMaterial);
+    usb.name = 'USB_Port';
+    usb.position.set(0, -DEVICE_DIMENSIONS.HEIGHT / 2, DEVICE_DIMENSIONS.DEPTH / 2 - 0.05);
+    deviceGroup.add(usb);
+
+    // Front face indicator (screen area) - on -Z face
+    const screenWidth = DEVICE_DIMENSIONS.WIDTH - SCREEN_INSET * 2;
+    const screenHeight = DEVICE_DIMENSIONS.HEIGHT - SCREEN_INSET * 2;
+    const screenGeometry = new THREE.PlaneGeometry(screenWidth, screenHeight);
+    const screenMaterial = new THREE.MeshStandardMaterial({ 
+      color: COLORS.DEVICE_SCREEN,
+      roughness: 0.2,
+      metalness: 0.1,
+      side: THREE.DoubleSide
+    });
+    const screen = new THREE.Mesh(screenGeometry, screenMaterial);
+    screen.name = 'Screen';
+    screen.position.set(0, 0, -DEVICE_DIMENSIONS.DEPTH / 2 - SCREEN_DEPTH_OFFSET);
+    screen.rotation.y = Math.PI;
+    deviceGroup.add(screen);
+
+    // Helper function to create axis arrow
+    function createArrow(color, length) {
+      const arrow = new THREE.Group();
+      
+      // Shaft
+      const shaftGeometry = new THREE.CylinderGeometry(0.02, 0.02, length - 0.15, 8);
+      const shaftMaterial = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+      const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
+      shaft.position.y = length / 2 - 0.075;
+      arrow.add(shaft);
+      
+      // Cone
+      const coneGeometry = new THREE.ConeGeometry(0.06, 0.15, 8);
+      const coneMaterial = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+      const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+      cone.position.y = length - 0.075;
+      arrow.add(cone);
+      
+      return arrow;
+    }
+
+    // Device axes showing SENSOR FRAME (X, Y, Z)
+    const axisLength = 0.4;
+
+    // Device X axis (red) - maps to Three.js -X (left/West)
+    const xAxis = createArrow(COLORS.AXIS_X, axisLength);
+    xAxis.name = 'Axis_X';
+    xAxis.rotation.z = Math.PI / 2;
+    deviceGroup.add(xAxis);
+
+    // Device Y axis (green) - maps to Three.js +Y (up)
+    const yAxis = createArrow(COLORS.AXIS_Y, axisLength);
+    yAxis.name = 'Axis_Y';
+    deviceGroup.add(yAxis);
+
+    // Device Z axis (blue) - maps to Three.js -Z (forward)
+    const zAxis = createArrow(COLORS.AXIS_Z, axisLength);
+    zAxis.name = 'Axis_Z';
+    zAxis.rotation.x = -Math.PI / 2;
+    deviceGroup.add(zAxis);
+
+    scene.add(deviceGroup);
+
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Handle resize
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+
+    // Export functionality
+    function exportToGLB(binary = true) {
+      const exporter = new GLTFExporter();
+      
+      const options = {
+        binary: binary,
+        onlyVisible: true,
+        includeCustomExtensions: false
+      };
+
+      exporter.parse(
+        deviceGroup,  // Export only the device, not grid/lights
+        function(result) {
+          if (binary) {
+            // GLB (binary)
+            const blob = new Blob([result], { type: 'application/octet-stream' });
+            downloadBlob(blob, 'FlySight.glb');
+          } else {
+            // GLTF (JSON)
+            const output = JSON.stringify(result, null, 2);
+            const blob = new Blob([output], { type: 'application/json' });
+            downloadBlob(blob, 'FlySight.gltf');
+          }
+        },
+        function(error) {
+          console.error('Export error:', error);
+          alert('Export failed: ' + error.message);
+        },
+        options
+      );
+    }
+
+    function downloadBlob(blob, filename) {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    }
+
+    // Button handlers
+    document.getElementById('exportBtn').addEventListener('click', () => exportToGLB(true));
+    document.getElementById('exportGltfBtn').addEventListener('click', () => exportToGLB(false));
+  </script>
+</body>
+</html>
