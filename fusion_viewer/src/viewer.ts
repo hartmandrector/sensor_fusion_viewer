@@ -33,6 +33,7 @@ export class OrientationViewer {
   private magLabel: THREE.Sprite | null = null;
   private magWorldArrow: THREE.ArrowHelper | null = null;  // Mag in world frame
   private magWorldLabel: THREE.Sprite | null = null;
+  private magWorldDirection: THREE.Vector3 | null = null;  // Store mag world direction for heading
   private showSensorVectors: boolean = false;
   
   // Linear and Earth acceleration vectors
@@ -47,6 +48,11 @@ export class OrientationViewer {
   private gravityArrow: THREE.ArrowHelper | null = null;
   private gravityLabel: THREE.Sprite | null = null;
   private showGravity: boolean = false;
+  
+  // Heading vector (compass heading in world frame)
+  private headingArrow: THREE.ArrowHelper | null = null;
+  private headingLabel: THREE.Sprite | null = null;
+  private showHeading: boolean = false;
   
   // Gyro rotation arrows (curved)
   private gyroArrowX: THREE.Group | null = null;
@@ -774,6 +780,81 @@ export class OrientationViewer {
   }
   
   /**
+   * Toggle heading vector (compass direction in world frame)
+   */
+  toggleHeading(show: boolean): void {
+    this.showHeading = show;
+    if (this.headingArrow) {
+      this.headingArrow.visible = show;
+    }
+    if (this.headingLabel) {
+      this.headingLabel.visible = show;
+    }
+  }
+  
+  /**
+   * Update heading vector display
+   * Shows the magnetic heading - the horizontal component of the magnetometer
+   * in world frame, pointing toward magnetic north.
+   * 
+   * This is computed by taking the calibrated mag reading, transforming it
+   * to world frame via the device quaternion, and projecting onto horizontal.
+   * 
+   * @param _headingDeg Heading in degrees (not used - we derive from mag directly)
+   */
+  updateHeadingVector(_headingDeg: number): void {
+    // Remove old heading arrow
+    if (this.headingArrow) {
+      this.scene.remove(this.headingArrow);
+      this.headingArrow.dispose();
+      this.headingArrow = null;
+    }
+    if (this.headingLabel) {
+      this.scene.remove(this.headingLabel);
+      this.disposeLabel(this.headingLabel);
+      this.headingLabel = null;
+    }
+    
+    if (!this.showHeading) return;
+    
+    // If we have the mag world direction stored, use it projected to horizontal
+    // This shows where the magnetometer says north is
+    if (this.magWorldDirection) {
+      // Project onto horizontal plane (zero out Y component)
+      const headingDir = new THREE.Vector3(
+        this.magWorldDirection.x,
+        0,
+        this.magWorldDirection.z
+      );
+      
+      // If the projection is too small (mag pointing straight up/down), skip
+      if (headingDir.length() < 0.1) {
+        return;
+      }
+      
+      headingDir.normalize();
+      
+      const arrowLength = 2.0;
+      
+      // Create heading arrow (green color for visibility)
+      this.headingArrow = new THREE.ArrowHelper(
+        headingDir,
+        new THREE.Vector3(0, 0, 0),
+        arrowLength,
+        0x00ff00,  // Green
+        0.2,
+        0.1
+      );
+      this.scene.add(this.headingArrow);
+      
+      // Add "H" label at tip
+      this.headingLabel = this.createTextLabel('H', '#00ff00');
+      this.headingLabel.position.copy(headingDir.clone().multiplyScalar(arrowLength + 0.15));
+      this.scene.add(this.headingLabel);
+    }
+  }
+  
+  /**
    * Update sensor vectors (raw readings in body frame)
    * These show the actual sensor readings attached to the device
    * Also shows mag in WORLD frame (cyan) so it stays fixed even if AHRS drifts
@@ -892,6 +973,10 @@ export class OrientationViewer {
       const magLocalVec = magLocal.clone();
       magLocalVec.applyQuaternion(this.deviceGroup.quaternion);
       const magWorldDir = magLocalVec.normalize();
+      
+      // Store for heading vector use
+      this.magWorldDirection = magWorldDir.clone();
+      
       const magWorldArrowLength = magLength * 3.0;
       this.magWorldArrow = new THREE.ArrowHelper(
         magWorldDir,

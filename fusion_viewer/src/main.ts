@@ -144,6 +144,7 @@ function setupEventListeners(): void {
   elements.showLinearAccel.addEventListener('change', handleShowLinearAccelChange);
   elements.showEarthAccel.addEventListener('change', handleShowEarthAccelChange);
   elements.showGravity.addEventListener('change', handleShowGravityChange);
+  elements.showHeading.addEventListener('change', handleShowHeadingChange);
   
   // Fusion Ch.7 specific
   elements.accelRejectSlider.addEventListener('input', handleAccelRejectChange);
@@ -437,6 +438,17 @@ function handleShowGravityChange(): void {
   const elements = getElements();
   if (state.viewer) {
     state.viewer.toggleGravity(elements.showGravity.checked);
+    updateDisplay(state.playbackIndex);
+  }
+}
+
+/**
+ * Handle show heading toggle
+ */
+function handleShowHeadingChange(): void {
+  const elements = getElements();
+  if (state.viewer) {
+    state.viewer.toggleHeading(elements.showHeading.checked);
     updateDisplay(state.playbackIndex);
   }
 }

@@ -39,6 +39,7 @@ export interface UIElements {
   showLinearAccel: HTMLInputElement;
   showEarthAccel: HTMLInputElement;
   showGravity: HTMLInputElement;
+  showHeading: HTMLInputElement;
   
   // Fusion Ch.7 specific
   accelRejectSlider: HTMLInputElement;
@@ -194,6 +195,7 @@ export function initializeElements(): UIElements {
     showLinearAccel: getElement<HTMLInputElement>('showLinearAccel'),
     showEarthAccel: getElement<HTMLInputElement>('showEarthAccel'),
     showGravity: getElement<HTMLInputElement>('showGravity'),
+    showHeading: getElement<HTMLInputElement>('showHeading'),
     
     // Fusion Ch.7 specific
     accelRejectSlider: getElement<HTMLInputElement>('accelRejectSlider'),

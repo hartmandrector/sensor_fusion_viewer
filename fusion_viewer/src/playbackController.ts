@@ -267,6 +267,9 @@ export function updateDisplay(frameIndex: number): void {
   // Update 3D viewer
   viewer.setOrientation(frame.quaternion);
   
+  // Update heading vector (compass direction in world frame)
+  viewer.updateHeadingVector(frame.heading);
+  
   // Update sensor vectors if enabled
   if (elements.showSensorVectors.checked && frame.imu && ahrs) {
     const imuCal = ahrs.getIMUCalibration();
