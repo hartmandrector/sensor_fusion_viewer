@@ -40,6 +40,7 @@ export interface UIElements {
   showEarthAccel: HTMLInputElement;
   showGravity: HTMLInputElement;
   showHeading: HTMLInputElement;
+  showCompassHeading: HTMLInputElement;
   
   // Fusion Ch.7 specific
   accelRejectSlider: HTMLInputElement;
@@ -196,6 +197,7 @@ export function initializeElements(): UIElements {
     showEarthAccel: getElement<HTMLInputElement>('showEarthAccel'),
     showGravity: getElement<HTMLInputElement>('showGravity'),
     showHeading: getElement<HTMLInputElement>('showHeading'),
+    showCompassHeading: getElement<HTMLInputElement>('showCompassHeading'),
     
     // Fusion Ch.7 specific
     accelRejectSlider: getElement<HTMLInputElement>('accelRejectSlider'),

@@ -45,12 +45,16 @@ export interface AHRSInterface {
   setIMUAxisRemap?(remap: import('./types').AxisRemap): void;
   setMagAxisRemap?(remap: import('./types').AxisRemap): void;
   // Optional advanced calibration methods
-  setSoftIronMatrix?(matrix: number[][]): void;
+  setSoftIronMatrix?(matrix: number[][] | null): void;
   setAccelScaleMatrix?(matrix: number[][]): void;
   // Acceleration outputs (gravity-compensated)
   getGravityVector(): { x: number; y: number; z: number };
   getLinearAcceleration(): { x: number; y: number; z: number };
   getEarthAcceleration(): { x: number; y: number; z: number };
+  // Compass heading (FusionCompass algorithm)
+  getCompassHeading(): number;
+  getCompassHeadingFromSensors?(accelBody: {x: number, y: number, z: number}, magBody: {x: number, y: number, z: number}): number;
+  getCompassHeadingFromMagQuaternion?(magBody: {x: number, y: number, z: number}, quat: {w: number, x: number, y: number, z: number}): number;
 }
 
 // ============================================================================

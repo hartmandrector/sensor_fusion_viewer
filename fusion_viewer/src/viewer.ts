@@ -33,7 +33,7 @@ export class OrientationViewer {
   private magLabel: THREE.Sprite | null = null;
   private magWorldArrow: THREE.ArrowHelper | null = null;  // Mag in world frame
   private magWorldLabel: THREE.Sprite | null = null;
-  private magWorldDirection: THREE.Vector3 | null = null;  // Store mag world direction for heading
+  private magWorldDirection: THREE.Vector3 | null = null;  // Store for heading calculation
   private showSensorVectors: boolean = false;
   
   // Linear and Earth acceleration vectors
@@ -49,10 +49,15 @@ export class OrientationViewer {
   private gravityLabel: THREE.Sprite | null = null;
   private showGravity: boolean = false;
   
-  // Heading vector (compass heading in world frame)
+  // Heading vector (magnetometer compass heading in world frame)
   private headingArrow: THREE.ArrowHelper | null = null;
   private headingLabel: THREE.Sprite | null = null;
   private showHeading: boolean = false;
+  
+  // Compass heading vector (FusionCompass algorithm)
+  private compassHeadingArrow: THREE.ArrowHelper | null = null;
+  private compassHeadingLabel: THREE.Sprite | null = null;
+  private showCompassHeading: boolean = false;
   
   // Gyro rotation arrows (curved)
   private gyroArrowX: THREE.Group | null = null;
@@ -439,7 +444,7 @@ export class OrientationViewer {
    */
   toggleMagPlot(
     samples: MAGData[],
-    calibration: { offsetX: number; offsetY: number; offsetZ: number }
+    calibration: { offsetX: number; offsetY: number; offsetZ: number; softIronMatrix?: number[][], referenceMagnitude?: number }
   ): void {
     // If already showing, remove it
     if (this.magPlotGroup) {
@@ -479,11 +484,25 @@ export class OrientationViewer {
       // Raw positions (before calibration)
       rawPositions.push(x * scale, y * scale, z * scale);
       
-      // Calibrated positions
-      const cx = (x - calibration.offsetX) * scale;
-      const cy = (y - calibration.offsetY) * scale;
-      const cz = (z - calibration.offsetZ) * scale;
-      calPositions.push(cx, cy, cz);
+      // Calibrated positions: apply hard iron offset, then soft iron matrix
+      let cx = x - calibration.offsetX;
+      let cy = y - calibration.offsetY;
+      let cz = z - calibration.offsetZ;
+      
+      // Apply soft iron matrix if provided
+      if (calibration.softIronMatrix) {
+        const m = calibration.softIronMatrix;
+        const corrected = [
+          m[0][0] * cx + m[0][1] * cy + m[0][2] * cz,
+          m[1][0] * cx + m[1][1] * cy + m[1][2] * cz,
+          m[2][0] * cx + m[2][1] * cy + m[2][2] * cz
+        ];
+        cx = corrected[0];
+        cy = corrected[1];
+        cz = corrected[2];
+      }
+      
+      calPositions.push(cx * scale, cy * scale, cz * scale);
     }
     
     rawGeometry.setAttribute('position', new THREE.Float32BufferAttribute(rawPositions, 3));
@@ -515,9 +534,10 @@ export class OrientationViewer {
     const center = new THREE.Mesh(centerGeometry, centerMaterial);
     this.magPlotGroup.add(center);
     
-    // Add reference sphere showing expected field magnitude (~0.5 gauss)
-    const expectedMag = 0.5 * scale;
-    const sphereGeometry = new THREE.SphereGeometry(expectedMag, 32, 32);
+    // Add reference sphere using the actual measured magnitude from calibration
+    const referenceMag = calibration.referenceMagnitude || 0.5;
+    const referenceSphereRadius = referenceMag * scale;
+    const sphereGeometry = new THREE.SphereGeometry(referenceSphereRadius, 32, 32);
     const sphereMaterial = new THREE.MeshBasicMaterial({
       color: 0x4488ff,
       wireframe: true,
@@ -791,16 +811,39 @@ export class OrientationViewer {
       this.headingLabel.visible = show;
     }
   }
+
+  /**
+   * Toggle FusionCompass heading vector
+   */
+  toggleCompassHeading(show: boolean): void {
+    this.showCompassHeading = show;
+    if (this.compassHeadingArrow) {
+      this.compassHeadingArrow.visible = show;
+    }
+    if (this.compassHeadingLabel) {
+      this.compassHeadingLabel.visible = show;
+    }
+  }
   
   /**
    * Update heading vector display
-   * Shows the magnetic heading - the horizontal component of the magnetometer
-   * in world frame, pointing toward magnetic north.
+   * Shows the magnetic heading - the compass direction of the magnetometer 
+   * vector when transformed to world frame.
    * 
-   * This is computed by taking the calibrated mag reading, transforming it
-   * to world frame via the device quaternion, and projecting onto horizontal.
+   * The heading comes from the ACTUAL MAGNETIC FIELD detected by the magnetometer,
+   * not from the quaternion. This is the true compass heading.
    * 
-   * @param _headingDeg Heading in degrees (not used - we derive from mag directly)
+   * Process:
+   * 1. Magnetometer reads field in body frame
+   * 2. Transform to world frame using device quaternion
+   * 3. Project to horizontal plane
+   * 4. Compute heading angle from horizontal projection
+   * 
+   * In Three.js world frame:
+   *   - Heading 0° = North = -Z direction
+   *   - Heading 90° = East = +X direction
+   * 
+   * @param _headingDeg Heading value (computed from mag world vector instead)
    */
   updateHeadingVector(_headingDeg: number): void {
     // Remove old heading arrow
@@ -817,8 +860,7 @@ export class OrientationViewer {
     
     if (!this.showHeading) return;
     
-    // If we have the mag world direction stored, use it projected to horizontal
-    // This shows where the magnetometer says north is
+    // Use the magnetometer world direction to compute heading
     if (this.magWorldDirection) {
       // Project onto horizontal plane (zero out Y component)
       const headingDir = new THREE.Vector3(
@@ -827,12 +869,17 @@ export class OrientationViewer {
         this.magWorldDirection.z
       );
       
-      // If the projection is too small (mag pointing straight up/down), skip
+      // If projection is too small (mag pointing straight up/down), skip
       if (headingDir.length() < 0.1) {
         return;
       }
       
       headingDir.normalize();
+      
+      // Compute heading angle from the projected direction
+      // atan2(x, -z) gives angle where 0° = -Z (North), 90° = +X (East)
+      let headingDeg = Math.atan2(headingDir.x, -headingDir.z) * 180 / Math.PI;
+      if (headingDeg < 0) headingDeg += 360;
       
       const arrowLength = 2.0;
       
@@ -847,11 +894,76 @@ export class OrientationViewer {
       );
       this.scene.add(this.headingArrow);
       
-      // Add "H" label at tip
-      this.headingLabel = this.createTextLabel('H', '#00ff00');
-      this.headingLabel.position.copy(headingDir.clone().multiplyScalar(arrowLength + 0.15));
+      // Add "H" label with heading value at tip
+      const labelText = `H:${Math.round(headingDeg)}°`;
+      this.headingLabel = this.createTextLabel(labelText, '#00ff00');
+      this.headingLabel.position.copy(headingDir.clone().multiplyScalar(arrowLength + 0.25));
       this.scene.add(this.headingLabel);
     }
+  }
+
+  /**
+   * Update FusionCompass heading vector display
+   * Shows heading computed directly from accelerometer and magnetometer
+   * using the x-io FusionCompass algorithm (tilt-compensated compass).
+   * 
+   * This is independent of the device orientation and can be compared
+   * against the magnetometer-based heading for diagnostics.
+   * 
+   * @param compassHeadingDeg Compass heading in degrees (0-360) from FusionCompass algorithm
+   */
+  updateCompassHeading(compassHeadingDeg: number): void {
+    // Remove old compass heading arrow
+    if (this.compassHeadingArrow) {
+      this.scene.remove(this.compassHeadingArrow);
+      this.compassHeadingArrow.dispose();
+      this.compassHeadingArrow = null;
+    }
+    if (this.compassHeadingLabel) {
+      this.scene.remove(this.compassHeadingLabel);
+      this.disposeLabel(this.compassHeadingLabel);
+      this.compassHeadingLabel = null;
+    }
+    
+    if (!this.showCompassHeading) return;
+    
+    // Convert compass heading angle to direction vector in Three.js frame
+    // The compass heading is in NWU frame (0°=North, 90°=West, 180°=South, 270°=East)
+    // But Three.js world frame has (0°=North=-Z, 90°=East=+X, 180°=South=+Z, 270°=West=-X)
+    // NWU has West at 90° while Three.js has East at 90°, so we negate the heading
+    const headingRad = -compassHeadingDeg * Math.PI / 180;
+    const headingDir = new THREE.Vector3(
+      Math.sin(headingRad),    // East component
+      0,                        // Horizontal plane
+      -Math.cos(headingRad)     // North component
+    );
+    
+    console.log('Viewer compass heading display:', {
+      compassHeadingDeg,
+      headingRad,
+      headingDir: { x: headingDir.x, y: headingDir.y, z: headingDir.z }
+    });
+    
+    headingDir.normalize();
+    
+    const arrowLength = 2.0;
+    
+    // Create compass heading arrow (yellow/lime color to differentiate from magnetometer)
+    this.compassHeadingArrow = new THREE.ArrowHelper(
+      headingDir,
+      new THREE.Vector3(0, 0, 0),
+      arrowLength,
+      0xffff00,  // Yellow
+      0.15,
+      0.08
+    );
+    this.scene.add(this.compassHeadingArrow);
+    
+    // Add "HC" label with heading value at tip
+    const labelText = `HC:${Math.round(compassHeadingDeg)}°`;
+    this.compassHeadingLabel = this.createTextLabel(labelText, '#ffff00');
+    this.compassHeadingLabel.position.copy(headingDir.clone().multiplyScalar(arrowLength + 0.25));
+    this.scene.add(this.compassHeadingLabel);
   }
   
   /**
@@ -974,7 +1086,7 @@ export class OrientationViewer {
       magLocalVec.applyQuaternion(this.deviceGroup.quaternion);
       const magWorldDir = magLocalVec.normalize();
       
-      // Store for heading vector use
+      // Store for heading calculation
       this.magWorldDirection = magWorldDir.clone();
       
       const magWorldArrowLength = magLength * 3.0;

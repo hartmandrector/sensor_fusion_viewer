@@ -114,6 +114,9 @@ export class FusionAhrsAdapter {
   private lastMagBody: FusionVector;  // Body frame for display
   private magValid: boolean = false;
   
+  // Last accelerometer (for compass heading calculation)
+  private lastAccelNWU: FusionVector;
+  
   constructor(config?: Partial<FusionConfig>, adapterSettings?: Partial<FusionAdapterSettings>) {
     // Merge settings
     this.settings = { 
@@ -147,6 +150,7 @@ export class FusionAhrsAdapter {
     this.lastMagNWU = { x: 0, y: 0, z: 0 };
     this.lastMagBody = { x: 0, y: 0, z: 0 };
     this.magValid = false;
+    this.lastAccelNWU = { x: 0, y: 0, z: 0 };
   }
   
   // ===========================================================================
@@ -421,6 +425,9 @@ export class FusionAhrsAdapter {
     const gyroNWU = this.bodyToNWU(gyroBody.x, gyroBody.y, gyroBody.z);
     const accelNWU = this.bodyToNWU(accelBody.x, accelBody.y, accelBody.z);
     
+    // Store accelerometer for compass heading calculation
+    this.lastAccelNWU = accelNWU;
+    
     // Apply runtime bias estimation if enabled
     let finalGyro = gyroNWU;
     if (this.settings.enableBiasEstimation) {
@@ -694,5 +701,210 @@ export class FusionAhrsAdapter {
    */
   getCurrentSettings(): FusionAdapterSettings {
     return { ...this.settings };
+  }
+
+  // ===========================================================================
+  // Compass Heading Calculation (x-io FusionCompass Algorithm)
+  // ===========================================================================
+
+  /**
+   * Calculate tilt-compensated magnetic heading using FusionCompass algorithm.
+   * 
+   * This implements the x-io Fusion library's FusionCompass function, which
+   * computes heading directly from accelerometer and magnetometer without
+   * relying on the quaternion. This is useful as an independent heading
+   * measurement to verify AHRS behavior.
+   * 
+   * Algorithm (NWU convention):
+   * 1. west = normalize(cross(accelerometer, magnetometer))
+   * 2. north = normalize(cross(west, accelerometer))
+   * 3. heading = atan2(west.x, north.x)
+   * 
+   * @param accelNWU Accelerometer in NWU frame (already calibrated and transformed)
+   * @param magNWU Magnetometer in NWU frame (already calibrated and transformed)
+   * @returns Heading in degrees (0-360)
+   */
+  private compassHeading(accelNWU: FusionVector, magNWU: FusionVector): number {
+    // Normalize accelerometer
+    const accelMag = Math.sqrt(accelNWU.x * accelNWU.x + accelNWU.y * accelNWU.y + accelNWU.z * accelNWU.z);
+    if (accelMag < 0.01) return 0; // Safety check for near-zero acceleration
+    
+    const accelNorm = {
+      x: accelNWU.x / accelMag,
+      y: accelNWU.y / accelMag,
+      z: accelNWU.z / accelMag
+    };
+
+    // west = cross(accel, mag)
+    const west = {
+      x: accelNorm.y * magNWU.z - accelNorm.z * magNWU.y,
+      y: accelNorm.z * magNWU.x - accelNorm.x * magNWU.z,
+      z: accelNorm.x * magNWU.y - accelNorm.y * magNWU.x
+    };
+
+    // Normalize west
+    const westMag = Math.sqrt(west.x * west.x + west.y * west.y + west.z * west.z);
+    if (westMag < 0.01) return 0; // Safety check
+    
+    const westNorm = {
+      x: west.x / westMag,
+      y: west.y / westMag,
+      z: west.z / westMag
+    };
+
+    // north = cross(west, accel)
+    const north = {
+      x: westNorm.y * accelNorm.z - westNorm.z * accelNorm.y,
+      y: westNorm.z * accelNorm.x - westNorm.x * accelNorm.z,
+      z: westNorm.x * accelNorm.y - westNorm.y * accelNorm.x
+    };
+
+    // heading = atan2(west.x, north.x)
+    let headingRad = Math.atan2(westNorm.x, north.x);
+    
+    // Convert to degrees and normalize to 0-360
+    let headingDeg = headingRad * RAD_TO_DEG;
+    if (headingDeg < 0) {
+      headingDeg += 360;
+    }
+    
+    // Debug - uncomment to trace algorithm
+    console.log('compassHeading algorithm:', {
+      accelNorm,
+      magNWU,
+      westNorm,
+      north,
+      headingRad,
+      headingDeg
+    });
+    
+    return headingDeg;
+  }
+
+  /**
+   * Get compass heading as an independent check of magnetic heading.
+   * 
+   * This computes heading directly from the last accelerometer and magnetometer
+   * readings without using the quaternion. Useful for diagnostics and comparing
+   * against the AHRS-derived yaw angle.
+   * 
+   * @returns Heading in degrees (0-360), or 0 if sensors are invalid
+   */
+  getCompassHeading(): number {
+    if (!this.magValid || Math.abs(this.lastAccelNWU.z + 1) < 0.01) {
+      return 0; // No valid data
+    }
+    return this.compassHeading(this.lastAccelNWU, this.lastMagNWU);
+  }
+
+  /**
+   * Compute compass heading from arbitrary accel and mag vectors.
+   * 
+   * This allows computing compass heading from frame data without needing
+   * to update the AHRS state. Vectors should be in body frame.
+   * 
+   * IMPORTANT: This uses the tilt-compensated compass algorithm which only works
+   * reliably when the device is roughly upright. For arbitrary orientations,
+   * use getCompassHeadingFromMagQuaternion instead with the device quaternion.
+   * 
+   * @param accelBody Accelerometer in body frame (calibrated)
+   * @param magBody Magnetometer in body frame (calibrated)
+   * @returns Heading in degrees (0-360), or 0 if inputs are invalid
+   */
+  getCompassHeadingFromSensors(accelBody: {x: number, y: number, z: number}, magBody: {x: number, y: number, z: number}): number {
+    // Transform to NWU for compass calculation
+    const accelNWU = this.bodyToNWU(accelBody.x, accelBody.y, accelBody.z);
+    const magNWU = this.bodyToNWU(magBody.x, magBody.y, magBody.z);
+    
+    const heading = this.compassHeading(accelNWU, magNWU);
+    
+    // Debug logging - uncomment to see transform chain
+    console.log('Compass heading (tilt-compensated):', {
+      accelBody,
+      magBody,
+      accelNWU,
+      magNWU,
+      headingDeg: heading
+    });
+    
+    return heading;
+  }
+
+  /**
+   * Compute compass heading using magnetometer rotated by device quaternion.
+   * 
+   * This is the correct way to calculate heading for arbitrary device orientations.
+   * It rotates the magnetometer from body frame to world/NWU frame using the
+   * device quaternion, then projects to horizontal plane and computes heading.
+   * 
+   * This matches how the green magnetometer heading vector is calculated.
+   * 
+   * @param magBody Magnetometer in body frame (calibrated)
+   * @param quat Device quaternion (NWU convention)
+   * @returns Heading in degrees (0-360), or 0 if inputs are invalid
+   */
+  getCompassHeadingFromMagQuaternion(magBody: {x: number, y: number, z: number}, quat: FusionQuaternion): number {
+    // Transform mag from body to NWU frame
+    const magNWU = this.bodyToNWU(magBody.x, magBody.y, magBody.z);
+    
+    // Rotate magnetometer using quaternion: mag_world = q * mag_nwu * q^(-1)
+    // For unit quaternion, q^(-1) = conjugate(q) = (w, -x, -y, -z)
+    
+    // Quaternion multiplication: q * v is computed as (0, mag_rotated) = q * (0, mag) * q_inv
+    // Using the formula: v' = v + 2*q_w*(q_xyz × v) + 2*(q_xyz × (q_xyz × v))
+    
+    const w = quat.w;
+    const x = quat.x;
+    const y = quat.y;
+    const z = quat.z;
+    
+    const mx = magNWU.x;
+    const my = magNWU.y;
+    const mz = magNWU.z;
+    
+    // Cross product q_xyz × v
+    const c1x = y * mz - z * my;
+    const c1y = z * mx - x * mz;
+    const c1z = x * my - y * mx;
+    
+    // Cross product q_xyz × (q_xyz × v)
+    const c2x = y * c1z - z * c1y;
+    const c2y = z * c1x - x * c1z;
+    const c2z = x * c1y - y * c1x;
+    
+    // Full rotation: v' = v + 2*w*(q_xyz × v) + 2*(q_xyz × (q_xyz × v))
+    const magWorldX = mx + 2 * w * c1x + 2 * c2x;
+    const magWorldY = my + 2 * w * c1y + 2 * c2y;
+    const magWorldZ = mz + 2 * w * c1z + 2 * c2z;
+    
+    // Project to horizontal plane (remove Z/Up component)
+    const magHorizontalX = magWorldX;
+    const magHorizontalY = magWorldY;
+    
+    const magHLen = Math.sqrt(magHorizontalX * magHorizontalX + magHorizontalY * magHorizontalY);
+    if (magHLen < 0.01) return 0; // Too small to compute heading
+    
+    // Normalize
+    const magHNormX = magHorizontalX / magHLen;
+    const magHNormY = magHorizontalY / magHLen;
+    
+    // Compute heading from projected direction
+    // In NWU: heading = atan2(east, north) = atan2(y, x)
+    let headingRad = Math.atan2(magHNormY, magHNormX);
+    let headingDeg = headingRad * RAD_TO_DEG;
+    if (headingDeg < 0) {
+      headingDeg += 360;
+    }
+    
+    console.log('Compass heading (quaternion-based):', {
+      magBody,
+      quat,
+      magNWU,
+      magWorld: { x: magWorldX, y: magWorldY, z: magWorldZ },
+      magHorizontal: { x: magHorizontalX, y: magHorizontalY },
+      headingDeg
+    });
+    
+    return headingDeg;
   }
 }

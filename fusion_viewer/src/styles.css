@@ -344,6 +344,39 @@ body {
   color: var(--text-secondary);
 }
 
+.calibration-result .cal-section {
+  margin-top: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(150, 150, 150, 0.2);
+}
+
+.calibration-result .cal-section:first-child {
+  border-bottom: none;
+}
+
+.calibration-result details {
+  cursor: pointer;
+}
+
+.calibration-result details summary:hover {
+  color: var(--success);
+}
+
+.calibration-result .quality-good {
+  color: #22c55e;
+  font-weight: bold;
+}
+
+.calibration-result .quality-fair {
+  color: #eab308;
+  font-weight: bold;
+}
+
+.calibration-result .quality-poor {
+  color: #ef4444;
+  font-weight: bold;
+}
+
 .calibration-result .apply-btn {
   margin-top: 0.5rem;
   padding: 0.3rem 0.6rem;

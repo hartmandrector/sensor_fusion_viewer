@@ -165,12 +165,23 @@ export function applyCalibration(): void {
   elements.magOffsetY.value = state.lastMagCalibration.offsetY.toFixed(4);
   elements.magOffsetZ.value = state.lastMagCalibration.offsetZ.toFixed(4);
   
+  // IMPORTANT: Clear soft iron matrix when applying hard iron only
+  state.softIronMatrix = null;
+  if (state.fusionAhrs?.setSoftIronMatrix) {
+    state.fusionAhrs.setSoftIronMatrix(null);
+  }
+  if (state.madgwickAhrs?.setSoftIronMatrix) {
+    state.madgwickAhrs.setSoftIronMatrix(null);
+  }
+  
   handleMagCalChange();
   refreshMagPlotIfVisible();
   
   // Notify calibration executive
   onSphereFitApplied();
   updateSummaryDisplay();
+  
+  debug.log('Applied hard iron calibration only (soft iron cleared)');
 }
 
 /**
@@ -186,7 +197,19 @@ export function handleShowMagPlot(): void {
   const offsetY = parseFloat(elements.magOffsetY.value) || 0;
   const offsetZ = parseFloat(elements.magOffsetZ.value) || 0;
   
-  state.viewer.toggleMagPlot(magSamples, { offsetX, offsetY, offsetZ });
+  // Include soft iron matrix and reference magnitude if available
+  const calibration: any = { offsetX, offsetY, offsetZ };
+  if (state.softIronMatrix) {
+    calibration.softIronMatrix = state.softIronMatrix;
+  }
+  // Use reference magnitude from ellipsoid fit if available, otherwise from hard iron fit
+  if (state.lastEllipsoidCalibration) {
+    calibration.referenceMagnitude = state.lastEllipsoidCalibration.referenceMagnitude;
+  } else if (state.lastMagCalibration) {
+    calibration.referenceMagnitude = state.lastMagCalibration.magnitude;
+  }
+  
+  state.viewer.toggleMagPlot(magSamples, calibration);
 }
 
 /**
@@ -238,7 +261,19 @@ export function refreshMagPlotIfVisible(): void {
   const offsetY = parseFloat(elements.magOffsetY.value) || 0;
   const offsetZ = parseFloat(elements.magOffsetZ.value) || 0;
   
-  state.viewer.refreshMagPlot(magSamples, { offsetX, offsetY, offsetZ });
+  // Include soft iron matrix and reference magnitude if available
+  const calibration: any = { offsetX, offsetY, offsetZ };
+  if (state.softIronMatrix) {
+    calibration.softIronMatrix = state.softIronMatrix;
+  }
+  // Use reference magnitude from ellipsoid fit if available, otherwise from hard iron fit
+  if (state.lastEllipsoidCalibration) {
+    calibration.referenceMagnitude = state.lastEllipsoidCalibration.referenceMagnitude;
+  } else if (state.lastMagCalibration) {
+    calibration.referenceMagnitude = state.lastMagCalibration.magnitude;
+  }
+  
+  state.viewer.refreshMagPlot(magSamples, calibration);
 }
 
 // ============================================================================
@@ -417,23 +452,69 @@ export function handleCalculateEllipsoid(): void {
     // Store the ellipsoid result for later use
     state.lastEllipsoidCalibration = result;
     
-    // Build result HTML
+    // Calculate condition number and matrix trace for diagnostics
+    const softIronInv = result.softIronInverse;
+    const trace = softIronInv[0][0] + softIronInv[1][1] + softIronInv[2][2];
+    const avgDiagonal = trace / 3;
+    
+    // Build result HTML with detailed ellipsoid information
     let html = `
-      <div class="cal-label">Hard Iron Offset:</div>
-      <div>X: <span class="cal-value">${result.hardIronOffset.x.toFixed(4)}</span></div>
-      <div>Y: <span class="cal-value">${result.hardIronOffset.y.toFixed(4)}</span></div>
-      <div>Z: <span class="cal-value">${result.hardIronOffset.z.toFixed(4)}</span></div>
-      <div style="margin-top: 0.5rem;">
-        <span class="cal-label">Sphericity:</span> 
-        <span class="quality-${result.sphericity > 0.9 ? 'good' : result.sphericity > 0.7 ? 'fair' : 'poor'}">${(result.sphericity * 100).toFixed(1)}%</span>
+      <div class="cal-section">
+        <div class="cal-label">Hard Iron Offset:</div>
+        <div>X: <span class="cal-value">${result.hardIronOffset.x.toFixed(4)}</span></div>
+        <div>Y: <span class="cal-value">${result.hardIronOffset.y.toFixed(4)}</span></div>
+        <div>Z: <span class="cal-value">${result.hardIronOffset.z.toFixed(4)}</span></div>
       </div>
-      <div><span class="cal-label">Residual RMS:</span> <span class="cal-value">${result.residualRms.toFixed(4)}</span></div>
+      
+      <div class="cal-section">
+        <div class="cal-label">Ellipsoid Semi-Axes (Raw Measurements):</div>
+        <div>A: <span class="cal-value">${result.eigenvalues.a.toFixed(4)}</span></div>
+        <div>B: <span class="cal-value">${result.eigenvalues.b.toFixed(4)}</span></div>
+        <div>C: <span class="cal-value">${result.eigenvalues.c.toFixed(4)}</span></div>
+      </div>
+      
+      <div class="cal-section">
+        <div class="cal-label">Soft Iron Inverse Matrix Diagnostics:</div>
+        <div>Matrix Trace (sum of diagonals): <span class="cal-value">${trace.toFixed(4)}</span></div>
+        <div>Average Diagonal Element: <span class="cal-value">${avgDiagonal.toFixed(4)}</span></div>
+        <div>Sample Count: <span class="cal-value">${result.sampleCount}</span></div>
+      </div>
+      
+      <div class="cal-section">
+        <div class="cal-label" style="margin-top: 0.5rem;">Ellipsoid Quality Metrics:</div>
+        <div>
+          <span class="cal-label">Sphericity (ideal = 1.0):</span> 
+          <span class="quality-${result.sphericity > 0.9 ? 'good' : result.sphericity > 0.7 ? 'fair' : 'poor'}">${(result.sphericity * 100).toFixed(1)}%</span>
+        </div>
+        <div>
+          <span class="cal-label">Residual RMS (ideal &lt; 5%):</span> 
+          <span class="quality-${result.residualRms < 0.05 ? 'good' : result.residualRms < 0.1 ? 'fair' : 'poor'}">${(result.residualRms * 100).toFixed(2)}%</span>
+        </div>
+        <div>
+          <span class="cal-label">Quality Score:</span> 
+          <span class="quality-${result.quality > 90 ? 'good' : result.quality > 70 ? 'fair' : 'poor'}">${result.quality.toFixed(1)}%</span>
+        </div>
+      </div>
+      
+      <div class="cal-section">
+        <div class="cal-label">Soft Iron Inverse Matrix (normalized for unit vectors):</div>
     `;
     
     // Display soft iron matrix
-    elements.softIronMatrixDisplay.innerHTML = formatSoftIronMatrix(result.softIronMatrix);
+    elements.softIronMatrixDisplay.innerHTML = formatSoftIronMatrix(result.softIronInverse);
     
-    html += `<button class="apply-btn" onclick="window.applyEllipsoidCalibration()">Apply Calibration</button>`;
+    html += `
+        <details style="font-size: 0.9rem; margin-top: 0.5rem;">
+          <summary>ℹ️ Matrix Interpretation Help</summary>
+          <div style="margin-top: 0.5rem; padding: 0.5rem; background: rgba(100,150,200,0.1); border-radius: 4px; font-size: 0.85rem; line-height: 1.4;">
+            <strong>Diagonal Elements ≈ 0.5:</strong> This is correct! The matrix corrects the ellipsoid back to a unit sphere by dividing by the average semi-axis length (≈ 2.0).<br>
+            <strong>Off-Diagonal Elements ≈ 0.01:</strong> These represent cross-axis coupling correction. Small values indicate minimal axis coupling (good sensor alignment).<br>
+            <strong>Expected Range:</strong> Diagonals typically 0.5–1.5, Off-diagonals typically &lt;±0.1 for well-aligned sensors.
+          </div>
+        </details>
+      </div>
+      <button class="apply-btn" onclick="window.applyEllipsoidCalibration()">Apply Calibration</button>
+    `;
     
     elements.calibrationResult.innerHTML = html;
     elements.calibrationResult.classList.add('visible');

@@ -270,6 +270,40 @@ export function updateDisplay(frameIndex: number): void {
   // Update heading vector (compass direction in world frame)
   viewer.updateHeadingVector(frame.heading);
   
+  // Update compass heading vector (FusionCompass algorithm)
+  // Compute from current frame's IMU data using FusionCompass (Chapter 7)
+  if (ahrs && frame.imu) {
+    // Get calibrated accel and mag for this frame
+    const imuCal = ahrs.getIMUCalibration();
+    const magCal = ahrs.getMagCalibration();
+    
+    // Calibrate accelerometer
+   // const accelCal = {
+   //   x: frame.imu.ax - imuCal.accelOffsetX,
+   //   y: frame.imu.ay - imuCal.accelOffsetY,
+   //   z: frame.imu.az - imuCal.accelOffsetZ
+   // };
+    
+    // Only compute compass heading if we have valid mag data
+    if (frame.mag) {
+      // Calibrate magnetometer
+      let magCal_x = frame.mag.x - magCal.offsetX;
+      let magCal_y = frame.mag.y - magCal.offsetY;
+      let magCal_z = frame.mag.z - magCal.offsetZ;
+      
+      // Apply scale factors
+      magCal_x *= magCal.scaleX;
+      magCal_y *= magCal.scaleY;
+      magCal_z *= magCal.scaleZ;
+      
+      // Use quaternion-based compass heading for arbitrary device orientations
+      // This properly accounts for device tilt
+      const magBody = { x: magCal_x, y: magCal_y, z: magCal_z };
+      const compassHeading = ahrs.getCompassHeadingFromMagQuaternion?.(magBody, frame.quaternion) || 0;
+      viewer.updateCompassHeading(compassHeading);
+    }
+  }
+  
   // Update sensor vectors if enabled
   if (elements.showSensorVectors.checked && frame.imu && ahrs) {
     const imuCal = ahrs.getIMUCalibration();

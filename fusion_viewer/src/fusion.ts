@@ -997,6 +997,17 @@ export class MadgwickAHRS {
   getMagCalibration(): MagCalibration {
     return { ...this.magCal };
   }
+
+  /**
+   * Get compass heading (stub for interface compatibility)
+   * For Madgwick algorithm, compass heading could be computed from
+   * the stored accelerometer and magnetometer, but for now we return 0.
+   * The main heading comes from the quaternion yaw.
+   */
+  getCompassHeading(): number {
+    // TODO: Implement FusionCompass algorithm if needed for Ch. 3
+    return 0;
+  }
 }
 
 // Export utility functions

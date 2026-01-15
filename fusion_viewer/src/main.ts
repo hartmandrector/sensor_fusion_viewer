@@ -145,6 +145,7 @@ function setupEventListeners(): void {
   elements.showEarthAccel.addEventListener('change', handleShowEarthAccelChange);
   elements.showGravity.addEventListener('change', handleShowGravityChange);
   elements.showHeading.addEventListener('change', handleShowHeadingChange);
+  elements.showCompassHeading.addEventListener('change', handleShowCompassHeadingChange);
   
   // Fusion Ch.7 specific
   elements.accelRejectSlider.addEventListener('input', handleAccelRejectChange);
@@ -449,6 +450,17 @@ function handleShowHeadingChange(): void {
   const elements = getElements();
   if (state.viewer) {
     state.viewer.toggleHeading(elements.showHeading.checked);
+    updateDisplay(state.playbackIndex);
+  }
+}
+
+/**
+ * Handle show compass heading toggle
+ */
+function handleShowCompassHeadingChange(): void {
+  const elements = getElements();
+  if (state.viewer) {
+    state.viewer.toggleCompassHeading(elements.showCompassHeading.checked);
     updateDisplay(state.playbackIndex);
   }
 }
