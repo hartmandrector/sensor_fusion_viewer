@@ -18,7 +18,7 @@ import type { AccelCalibration6PosResult } from './accelCalibration6Pos';
 // Algorithm Type
 // ============================================================================
 
-export type AlgorithmType = 'madgwick' | 'fusion';
+export type AlgorithmType = 'madgwick' | 'fusion' | 'kalman';
 
 // ============================================================================
 // AHRS Interface (common between algorithms)
@@ -125,6 +125,7 @@ export const state = {
   algorithm: 'fusion' as AlgorithmType,
   madgwickAhrs: null as MadgwickAHRS | null,
   fusionAhrs: null as FusionAhrsAdapter | null,
+  kalmanAhrs: null as any | null,  // KalmanAhrsAdapter
   
   // Playback state
   isPlaying: false,

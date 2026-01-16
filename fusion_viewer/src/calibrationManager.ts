@@ -173,6 +173,9 @@ export function applyCalibration(): void {
   if (state.madgwickAhrs?.setSoftIronMatrix) {
     state.madgwickAhrs.setSoftIronMatrix(null);
   }
+  if (state.kalmanAhrs?.setSoftIronMatrix) {
+    state.kalmanAhrs.setSoftIronMatrix(null);
+  }
   
   handleMagCalChange();
   refreshMagPlotIfVisible();
@@ -546,14 +549,17 @@ export function applyEllipsoidCalibration(): void {
   // Store soft iron matrix in state
   state.softIronMatrix = state.lastEllipsoidCalibration.softIronInverse;
   
-  // Apply soft iron matrix to BOTH AHRS instances (so it persists when switching algorithms)
+  // Apply soft iron matrix to ALL AHRS instances (so it persists when switching algorithms)
   if (state.fusionAhrs?.setSoftIronMatrix) {
     state.fusionAhrs.setSoftIronMatrix(state.lastEllipsoidCalibration.softIronInverse);
   }
   if (state.madgwickAhrs?.setSoftIronMatrix) {
     state.madgwickAhrs.setSoftIronMatrix(state.lastEllipsoidCalibration.softIronInverse);
   }
-  debug.log('Applied soft iron matrix to both AHRS:', state.lastEllipsoidCalibration.softIronInverse);
+  if (state.kalmanAhrs?.setSoftIronMatrix) {
+    state.kalmanAhrs.setSoftIronMatrix(state.lastEllipsoidCalibration.softIronInverse);
+  }
+  debug.log('Applied soft iron matrix to all AHRS:', state.lastEllipsoidCalibration.softIronInverse);
   
   // Also apply hard iron via normal mag cal change
   handleMagCalChange();

@@ -11,12 +11,14 @@
 
 import { MadgwickAHRS } from './fusion';
 import { FusionAhrsAdapter } from './FusionAhrsAdapter';
+import { KalmanAhrsAdapter } from './KalmanAhrsAdapter';
 import { parseCSV } from './csvParser';
 import { OrientationViewer } from './viewer';
 import { debug } from './constants';
 
 // State and UI modules
 import { state, type AlgorithmType } from './appState';
+import type { IMUCalibration, MagCalibration } from './types';
 import { getElements, initializeElements } from './uiElements';
 
 // Controller modules
@@ -102,9 +104,19 @@ function init(): void {
     }
   );
   
+  state.kalmanAhrs = new KalmanAhrsAdapter({
+    ...calConfig
+  });
+  
   // Set active algorithm based on UI
   state.algorithm = elements.algorithmSelect.value as AlgorithmType;
-  state.ahrs = state.algorithm === 'fusion' ? state.fusionAhrs : state.madgwickAhrs;
+  if (state.algorithm === 'fusion') {
+    state.ahrs = state.fusionAhrs;
+  } else if (state.algorithm === 'kalman') {
+    state.ahrs = state.kalmanAhrs;
+  } else {
+    state.ahrs = state.madgwickAhrs;
+  }
   
   // Show/hide fusion-specific settings
   updateFusionSettingsVisibility();
@@ -290,21 +302,35 @@ function handleAlgorithmChange(): void {
   state.algorithm = elements.algorithmSelect.value as AlgorithmType;
   
   // Switch active AHRS
-  state.ahrs = state.algorithm === 'fusion' ? state.fusionAhrs : state.madgwickAhrs;
+  if (state.algorithm === 'fusion') {
+    state.ahrs = state.fusionAhrs;
+  } else if (state.algorithm === 'kalman') {
+    state.ahrs = state.kalmanAhrs;
+  } else {
+    state.ahrs = state.madgwickAhrs;
+  }
   
   // Copy calibration between algorithms
-  if (state.fusionAhrs && state.madgwickAhrs) {
-    const imuCal = state.algorithm === 'fusion' 
-      ? state.madgwickAhrs.getIMUCalibration()
-      : state.fusionAhrs.getIMUCalibration();
-    const magCal = state.algorithm === 'fusion'
-      ? state.madgwickAhrs.getMagCalibration()
-      : state.fusionAhrs.getMagCalibration();
+  if (state.fusionAhrs && state.madgwickAhrs && state.kalmanAhrs) {
+    // Get calibration from the previous algorithm
+    let imuCal: IMUCalibration;
+    let magCal: MagCalibration;
+    
+    if (state.algorithm === 'fusion') {
+      imuCal = state.madgwickAhrs.getIMUCalibration();
+      magCal = state.madgwickAhrs.getMagCalibration();
+    } else if (state.algorithm === 'kalman') {
+      imuCal = state.fusionAhrs.getIMUCalibration();
+      magCal = state.fusionAhrs.getMagCalibration();
+    } else {
+      imuCal = state.fusionAhrs.getIMUCalibration();
+      magCal = state.fusionAhrs.getMagCalibration();
+    }
     
     state.ahrs?.setIMUCalibration(imuCal);
     state.ahrs?.setMagCalibration(magCal);
     
-    // Also copy matrix calibrations (accel scale matrix and soft iron matrix)
+    // Also copy matrix calibrations
     if (state.accelScaleMatrix && state.ahrs?.setAccelScaleMatrix) {
       state.ahrs.setAccelScaleMatrix(state.accelScaleMatrix);
     }
