@@ -24,6 +24,7 @@ import {
   createGPSTopDownDataset, 
   createGPSProfileDataset, 
   createGPSSpeedDataset,
+  createGPSSmoothSpeedDataset,
   createGPSStartMarker,
   getGPSComponentData,
   getGPSSmoothVelocityData
@@ -687,6 +688,10 @@ function createSpeedChart(
   if (gpsResult && gpsResult.points.length > 0) {
     const gpsDataset = createGPSSpeedDataset(gpsResult);
     config.data.datasets.push(gpsDataset as any);
+    
+    // Add smoothed GPS speed (green)
+    const gpsSmoothDataset = createGPSSmoothSpeedDataset(gpsResult);
+    config.data.datasets.push(gpsSmoothDataset as any);
   }
   
   speedChart = new Chart(canvas, config);

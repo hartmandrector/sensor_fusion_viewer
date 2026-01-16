@@ -231,6 +231,29 @@ export function createGPSSpeedDataset(
 }
 
 /**
+ * Create GPS smoothed speed dataset for speed chart (Smooth Horizontal Speed vs Smooth Vertical Speed)
+ */
+export function createGPSSmoothSpeedDataset(
+  gpsResult: GPSIntegrationResult
+): ChartDataset<'scatter'> {
+  const points = gpsResult.points.map(p => ({
+    x: p.smoothHorizontalSpeed,
+    y: p.smoothVelUp
+  }));
+  
+  return {
+    label: 'GPS Smooth Speed',
+    data: points,
+    borderColor: '#00ff88',
+    backgroundColor: 'rgba(0, 255, 136, 0.3)',
+    pointRadius: 1,
+    showLine: true,
+    borderWidth: 1,
+    order: 0
+  };
+}
+
+/**
  * Create GPS start marker for top-down chart
  */
 export function createGPSStartMarker(
