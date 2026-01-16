@@ -149,6 +149,9 @@ export const state = {
   
   // Integration results
   integrationResult: null as import('./accelerationIntegration').IntegrationResult | null,
+  
+  // Integration start time (absolute sensor timestamp in seconds)
+  integrationStartTime: 0,
 };
 
 // ============================================================================

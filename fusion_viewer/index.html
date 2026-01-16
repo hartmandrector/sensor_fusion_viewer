@@ -58,9 +58,16 @@
             </div>
             <canvas id="componentChartCanvas"></canvas>
           </div>
-          <div class="chart-cell">
-            <h3>Top-Down View (North vs West)</h3>
-            <canvas id="topDownChartCanvas"></canvas>
+          <div class="chart-cell top-down-container">
+            <div class="top-down-sidebar">
+              <h3>Top-Down View</h3>
+              <div class="top-down-legend" id="topDownLegend">
+                <!-- Legend populated by JS -->
+              </div>
+            </div>
+            <div class="top-down-chart-wrapper">
+              <canvas id="topDownChartCanvas"></canvas>
+            </div>
           </div>
           <div class="chart-cell">
             <h3>Profile View (Distance vs Altitude)</h3>
@@ -401,6 +408,13 @@
           </div>
           <button id="calculateIntegrationBtn" disabled>Calculate Integration</button>
           <button id="showChartsBtn" disabled>Show Integration Charts</button>
+          
+          <!-- GPS Track Data -->
+          <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #444;">
+            <input type="file" id="trackFile" accept=".csv,.CSV" style="display: none;" />
+            <button id="loadTrackBtn" disabled>Load TRACK.CSV</button>
+            <div id="gpsStatus" style="font-size: 0.75rem; margin-top: 0.5rem; color: #888;">No GPS data loaded</div>
+          </div>
         </section>
       </aside>
     </main>

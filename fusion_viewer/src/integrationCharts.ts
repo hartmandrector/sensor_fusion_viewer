@@ -8,14 +8,29 @@
  * 4. Speed Chart - Horizontal Speed vs Vertical Speed
  * 
  * Uses Chart.js for rendering.
+ * 
+ * Chart Lines:
+ * - Blue: Sensor Fusion Integration
+ * - Cyan: GPS Ground Truth (when loaded)
+ * - Yellow/Gold: GPS-Fused Integration (future)
  */
 
-import { Chart, ChartConfiguration, registerables } from 'chart.js';
+import { Chart, ChartConfiguration, ChartDataset, registerables } from 'chart.js';
+import zoomPlugin from 'chartjs-plugin-zoom';
 import { IntegrationResult } from './accelerationIntegration';
 import { debug } from './constants';
+import { 
+  shouldIncludeGPS, 
+  createGPSTopDownDataset, 
+  createGPSProfileDataset, 
+  createGPSSpeedDataset,
+  createGPSStartMarker,
+  getGPSComponentData
+} from './gpsCharts';
+import { getGPSDataForCharts } from './gpsIntegration';
 
-// Register Chart.js components
-Chart.register(...registerables);
+// Register Chart.js components and plugins
+Chart.register(...registerables, zoomPlugin);
 
 // ============================================================================
 // Types
@@ -44,6 +59,9 @@ let currentIntegration: IntegrationResult | null = null;
 
 /**
  * Create or update the component time-series chart
+ * 
+ * Shows data starting from the integration start time.
+ * Time axis is relative (seconds from start of data).
  */
 function createComponentChart(
   canvas: HTMLCanvasElement,
@@ -108,17 +126,32 @@ function createComponentChart(
       break;
   }
   
+  // Filter data to only show from startIndex onwards (integration start time)
+  const startIdx = data.startIndex;
+  const filteredTime = data.time.slice(startIdx);
+  const filteredValues = values.slice(startIdx);
+  
+  // Get the start time offset for relative time display
+  const timeOffset = filteredTime.length > 0 ? filteredTime[0] : 0;
+  
+  // Create scatter data for integration with RELATIVE time (x,y format)
+  const integrationData = filteredTime.map((t, i) => ({ x: t - timeOffset, y: filteredValues[i] }));
+  
+  // Determine time bounds (relative: 0 to duration)
+  const minTime = 0;
+  const maxTime = filteredTime.length > 0 ? filteredTime[filteredTime.length - 1] - timeOffset : 1;
+  
   const config: ChartConfiguration = {
-    type: 'line',
+    type: 'scatter',
     data: {
-      labels: data.time.map(t => t.toFixed(2)),
       datasets: [{
         label: `${label} (${unit})`,
-        data: values,
-        borderColor: '#4488ff',
-        backgroundColor: 'rgba(68, 136, 255, 0.1)',
+        data: integrationData,
+        borderColor: '#ff44ff',
+        backgroundColor: 'rgba(255, 68, 255, 0.1)',
         borderWidth: 1,
         pointRadius: 0,
+        showLine: true,
         fill: true
       }]
     },
@@ -134,11 +167,35 @@ function createComponentChart(
         },
         legend: {
           labels: { color: '#ccc' }
+        },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: 'x'
+          },
+          zoom: {
+            wheel: {
+              enabled: true
+            },
+            pinch: {
+              enabled: true
+            },
+            drag: {
+              enabled: true,
+              backgroundColor: 'rgba(68, 136, 255, 0.3)',
+              borderColor: '#4488ff',
+              borderWidth: 1
+            },
+            mode: 'x'
+          }
         }
       },
       scales: {
         x: {
-          title: { display: true, text: 'Time (s)', color: '#ccc' },
+          type: 'linear',
+          min: minTime,
+          max: maxTime,
+          title: { display: true, text: 'Relative Time (s)', color: '#ccc' },
           ticks: { color: '#888', maxTicksLimit: 10 },
           grid: { color: '#333' }
         },
@@ -151,12 +208,47 @@ function createComponentChart(
     }
   };
   
+  // Add GPS data if available (filter to show only from start time onwards)
+  if (shouldIncludeGPS()) {
+    const gpsResult = getGPSDataForCharts();
+    if (gpsResult) {
+      const gpsData = getGPSComponentData(gpsResult, component);
+      if (gpsData.values.length > 0) {
+        // Filter GPS data to only show from integration start time onwards
+        // Convert to relative time using same offset
+        const gpsFiltered: { x: number; y: number }[] = [];
+        for (let i = 0; i < gpsData.time.length; i++) {
+          if (gpsData.time[i] >= timeOffset) {
+            gpsFiltered.push({ x: gpsData.time[i] - timeOffset, y: gpsData.values[i] });
+          }
+        }
+        
+        if (gpsFiltered.length > 0) {
+          const gpsDataset: ChartDataset<'scatter'> = {
+            label: `GPS ${label}`,
+            data: gpsFiltered,
+            borderColor: '#4488ff',
+            backgroundColor: 'rgba(68, 136, 255, 0.3)',
+            borderWidth: 1,
+            pointRadius: 1,
+            showLine: true,
+            fill: false
+          };
+          config.data.datasets.push(gpsDataset as any);
+        }
+      }
+    }
+  }
+  
   componentChart = new Chart(canvas, config);
   return componentChart;
 }
 
 /**
  * Create or update the top-down position chart (North vs West)
+ * 
+ * Note: X axis is reversed so that East appears on the right (positive West on left).
+ * When GPS data is present, bounds are calculated from GPS only (ground truth).
  */
 function createTopDownChart(
   canvas: HTMLCanvasElement,
@@ -166,11 +258,65 @@ function createTopDownChart(
     topDownChart.destroy();
   }
   
+  // Calculate square size based on container
+  const wrapper = canvas.parentElement;
+  if (wrapper) {
+    const wrapperWidth = wrapper.clientWidth;
+    const wrapperHeight = wrapper.clientHeight;
+    const squareSize = Math.min(wrapperWidth, wrapperHeight);
+    // Set canvas display size (CSS pixels)
+    canvas.style.width = `${squareSize}px`;
+    canvas.style.height = `${squareSize}px`;
+  }
+  
   // Create scatter data points
   const points = data.posNorth.map((n, i) => ({
     x: data.posWest[i],
     y: n
   }));
+  
+  // Check if GPS data is available for bounds calculation
+  let useGPSBounds = false;
+  let gpsResult: ReturnType<typeof getGPSDataForCharts> = null;
+  let boundsMinX = Infinity, boundsMaxX = -Infinity;
+  let boundsMinY = Infinity, boundsMaxY = -Infinity;
+  
+  if (shouldIncludeGPS()) {
+    gpsResult = getGPSDataForCharts();
+    if (gpsResult && gpsResult.points.length > 0) {
+      useGPSBounds = true;
+      // Calculate bounds from GPS data only (ground truth)
+      for (const p of gpsResult.points) {
+        boundsMinX = Math.min(boundsMinX, p.posWest);
+        boundsMaxX = Math.max(boundsMaxX, p.posWest);
+        boundsMinY = Math.min(boundsMinY, p.posNorth);
+        boundsMaxY = Math.max(boundsMaxY, p.posNorth);
+      }
+    }
+  }
+  
+  // If no GPS, calculate bounds from integration data
+  if (!useGPSBounds) {
+    for (let i = 0; i < data.posWest.length; i++) {
+      boundsMinX = Math.min(boundsMinX, data.posWest[i]);
+      boundsMaxX = Math.max(boundsMaxX, data.posWest[i]);
+      boundsMinY = Math.min(boundsMinY, data.posNorth[i]);
+      boundsMaxY = Math.max(boundsMaxY, data.posNorth[i]);
+    }
+  }
+  
+  // Calculate fixed aspect ratio bounds (1:1 scale for X and Y)
+  const rangeX = boundsMaxX - boundsMinX;
+  const rangeY = boundsMaxY - boundsMinY;
+  const maxRange = Math.max(rangeX, rangeY) * 1.1; // Add 10% padding
+  const centerX = (boundsMinX + boundsMaxX) / 2;
+  const centerY = (boundsMinY + boundsMaxY) / 2;
+  
+  // Final bounds with equal aspect ratio
+  const finalMinX = centerX - maxRange / 2;
+  const finalMaxX = centerX + maxRange / 2;
+  const finalMinY = centerY - maxRange / 2;
+  const finalMaxY = centerY + maxRange / 2;
   
   const config: ChartConfiguration = {
     type: 'scatter',
@@ -178,8 +324,8 @@ function createTopDownChart(
       datasets: [{
         label: 'Position',
         data: points,
-        borderColor: '#44ff44',
-        backgroundColor: 'rgba(68, 255, 68, 0.5)',
+        borderColor: '#ff44ff',
+        backgroundColor: 'rgba(255, 68, 255, 0.5)',
         pointRadius: 1,
         showLine: true,
         borderWidth: 1
@@ -195,25 +341,31 @@ function createTopDownChart(
     },
     options: {
       responsive: true,
-      maintainAspectRatio: false,
+      maintainAspectRatio: true,
+      aspectRatio: 1, // Force 1:1 aspect ratio for undistorted top-down view
       animation: false,
       plugins: {
         title: {
-          display: true,
-          text: 'Top-Down View (Position)',
-          color: '#fff'
+          display: false // Title moved to external HTML
         },
         legend: {
-          labels: { color: '#ccc' }
+          display: false // Legend moved to external HTML
         }
       },
       scales: {
         x: {
+          type: 'linear',
+          min: finalMinX,
+          max: finalMaxX,
+          reverse: true, // Reverse so East (negative West) is on the right
           title: { display: true, text: 'West (m)', color: '#ccc' },
           ticks: { color: '#888' },
           grid: { color: '#333' }
         },
         y: {
+          type: 'linear',
+          min: finalMinY,
+          max: finalMaxY,
           title: { display: true, text: 'North (m)', color: '#ccc' },
           ticks: { color: '#888' },
           grid: { color: '#333' }
@@ -222,12 +374,65 @@ function createTopDownChart(
     }
   };
   
+  // Add GPS data if available
+  if (gpsResult && gpsResult.points.length > 0) {
+    const gpsDataset = createGPSTopDownDataset(gpsResult);
+    config.data.datasets.push(gpsDataset as any);
+    
+    const gpsStart = createGPSStartMarker(gpsResult);
+    if (gpsStart) {
+      config.data.datasets.push(gpsStart as any);
+    }
+  }
+  
   topDownChart = new Chart(canvas, config);
+  
+  // Populate custom legend
+  updateTopDownLegend(config.data.datasets as any[]);
+  
   return topDownChart;
 }
 
 /**
+ * Update the custom legend for the top-down chart
+ */
+function updateTopDownLegend(datasets: { label: string; borderColor: string; pointStyle?: string }[]): void {
+  const legendContainer = document.getElementById('topDownLegend');
+  if (!legendContainer) return;
+  
+  legendContainer.innerHTML = '';
+  
+  for (const dataset of datasets) {
+    // Skip start point markers in legend (they're shown with their own style)
+    if (dataset.label === 'Start' || dataset.label === 'GPS Start') continue;
+    
+    const item = document.createElement('div');
+    item.className = 'top-down-legend-item';
+    
+    const colorBox = document.createElement('span');
+    colorBox.className = 'top-down-legend-color';
+    colorBox.style.backgroundColor = dataset.borderColor as string;
+    
+    const label = document.createElement('span');
+    label.className = 'top-down-legend-label';
+    label.textContent = dataset.label;
+    
+    item.appendChild(colorBox);
+    item.appendChild(label);
+    legendContainer.appendChild(item);
+  }
+  
+  // Add start marker legend items
+  const startItem = document.createElement('div');
+  startItem.className = 'top-down-legend-item';
+  startItem.innerHTML = `<span class="top-down-legend-color" style="background-color: #ffff00; width: 8px; height: 8px; border-radius: 50%;"></span><span class="top-down-legend-label">Start</span>`;
+  legendContainer.appendChild(startItem);
+}
+
+/**
  * Create or update the profile chart (Horizontal Distance vs Altitude)
+ * 
+ * When GPS data is present, bounds are calculated from GPS only (ground truth).
  */
 function createProfileChart(
   canvas: HTMLCanvasElement,
@@ -243,14 +448,48 @@ function createProfileChart(
     y: data.posUp[i]
   }));
   
+  // Check if GPS data is available for bounds calculation
+  let useGPSBounds = false;
+  let gpsResult: ReturnType<typeof getGPSDataForCharts> = null;
+  let boundsMinX = Infinity, boundsMaxX = -Infinity;
+  let boundsMinY = Infinity, boundsMaxY = -Infinity;
+  
+  if (shouldIncludeGPS()) {
+    gpsResult = getGPSDataForCharts();
+    if (gpsResult && gpsResult.points.length > 0) {
+      useGPSBounds = true;
+      // Calculate bounds from GPS data only (ground truth)
+      for (const p of gpsResult.points) {
+        boundsMinX = Math.min(boundsMinX, p.horizontalDistance);
+        boundsMaxX = Math.max(boundsMaxX, p.horizontalDistance);
+        boundsMinY = Math.min(boundsMinY, p.posUp);
+        boundsMaxY = Math.max(boundsMaxY, p.posUp);
+      }
+    }
+  }
+  
+  // If no GPS, calculate bounds from integration data
+  if (!useGPSBounds) {
+    for (let i = 0; i < data.horizontalDistance.length; i++) {
+      boundsMinX = Math.min(boundsMinX, data.horizontalDistance[i]);
+      boundsMaxX = Math.max(boundsMaxX, data.horizontalDistance[i]);
+      boundsMinY = Math.min(boundsMinY, data.posUp[i]);
+      boundsMaxY = Math.max(boundsMaxY, data.posUp[i]);
+    }
+  }
+  
+  // Add padding to bounds
+  const padX = (boundsMaxX - boundsMinX) * 0.05 || 10;
+  const padY = (boundsMaxY - boundsMinY) * 0.05 || 10;
+  
   const config: ChartConfiguration = {
     type: 'scatter',
     data: {
       datasets: [{
         label: 'Profile',
         data: points,
-        borderColor: '#ff8844',
-        backgroundColor: 'rgba(255, 136, 68, 0.5)',
+        borderColor: '#ff44ff',
+        backgroundColor: 'rgba(255, 68, 255, 0.5)',
         pointRadius: 1,
         showLine: true,
         borderWidth: 1
@@ -280,11 +519,17 @@ function createProfileChart(
       },
       scales: {
         x: {
+          type: 'linear',
+          min: boundsMinX - padX,
+          max: boundsMaxX + padX,
           title: { display: true, text: 'Horizontal Distance (m)', color: '#ccc' },
           ticks: { color: '#888' },
           grid: { color: '#333' }
         },
         y: {
+          type: 'linear',
+          min: boundsMinY - padY,
+          max: boundsMaxY + padY,
           title: { display: true, text: 'Altitude (m)', color: '#ccc' },
           ticks: { color: '#888' },
           grid: { color: '#333' }
@@ -293,12 +538,20 @@ function createProfileChart(
     }
   };
   
+  // Add GPS data if available
+  if (gpsResult && gpsResult.points.length > 0) {
+    const gpsDataset = createGPSProfileDataset(gpsResult);
+    config.data.datasets.push(gpsDataset as any);
+  }
+  
   profileChart = new Chart(canvas, config);
   return profileChart;
 }
 
 /**
  * Create or update the speed chart (Horizontal Speed vs Vertical Speed)
+ * 
+ * When GPS data is present, bounds are calculated from GPS only (ground truth).
  */
 function createSpeedChart(
   canvas: HTMLCanvasElement,
@@ -313,6 +566,40 @@ function createSpeedChart(
     x: h,
     y: data.velUp[i]
   }));
+  
+  // Check if GPS data is available for bounds calculation
+  let useGPSBounds = false;
+  let gpsResult: ReturnType<typeof getGPSDataForCharts> = null;
+  let boundsMinX = Infinity, boundsMaxX = -Infinity;
+  let boundsMinY = Infinity, boundsMaxY = -Infinity;
+  
+  if (shouldIncludeGPS()) {
+    gpsResult = getGPSDataForCharts();
+    if (gpsResult && gpsResult.points.length > 0) {
+      useGPSBounds = true;
+      // Calculate bounds from GPS data only (ground truth)
+      for (const p of gpsResult.points) {
+        boundsMinX = Math.min(boundsMinX, p.horizontalSpeed);
+        boundsMaxX = Math.max(boundsMaxX, p.horizontalSpeed);
+        boundsMinY = Math.min(boundsMinY, p.velUp);
+        boundsMaxY = Math.max(boundsMaxY, p.velUp);
+      }
+    }
+  }
+  
+  // If no GPS, calculate bounds from integration data
+  if (!useGPSBounds) {
+    for (let i = 0; i < data.horizontalSpeed.length; i++) {
+      boundsMinX = Math.min(boundsMinX, data.horizontalSpeed[i]);
+      boundsMaxX = Math.max(boundsMaxX, data.horizontalSpeed[i]);
+      boundsMinY = Math.min(boundsMinY, data.velUp[i]);
+      boundsMaxY = Math.max(boundsMaxY, data.velUp[i]);
+    }
+  }
+  
+  // Add padding to bounds
+  const padX = (boundsMaxX - boundsMinX) * 0.05 || 1;
+  const padY = (boundsMaxY - boundsMinY) * 0.05 || 1;
   
   const config: ChartConfiguration = {
     type: 'scatter',
@@ -351,11 +638,17 @@ function createSpeedChart(
       },
       scales: {
         x: {
+          type: 'linear',
+          min: boundsMinX - padX,
+          max: boundsMaxX + padX,
           title: { display: true, text: 'Horizontal Speed (m/s)', color: '#ccc' },
           ticks: { color: '#888' },
           grid: { color: '#333' }
         },
         y: {
+          type: 'linear',
+          min: boundsMinY - padY,
+          max: boundsMaxY + padY,
           title: { display: true, text: 'Vertical Speed (m/s)', color: '#ccc' },
           ticks: { color: '#888' },
           grid: { color: '#333' }
@@ -363,6 +656,12 @@ function createSpeedChart(
       }
     }
   };
+  
+  // Add GPS data if available
+  if (gpsResult && gpsResult.points.length > 0) {
+    const gpsDataset = createGPSSpeedDataset(gpsResult);
+    config.data.datasets.push(gpsDataset as any);
+  }
   
   speedChart = new Chart(canvas, config);
   return speedChart;
@@ -442,4 +741,20 @@ export function destroyCharts(): void {
  */
 export function areChartsActive(): boolean {
   return currentIntegration !== null;
+}
+
+/**
+ * Refresh all charts with current data (useful when GPS data is loaded)
+ */
+export function refreshCharts(): void {
+  if (currentIntegration) {
+    initializeCharts(currentIntegration);
+  }
+}
+
+// Listen for GPS data loaded event to refresh charts
+if (typeof window !== 'undefined') {
+  window.addEventListener('gps-data-loaded', () => {
+    refreshCharts();
+  });
 }

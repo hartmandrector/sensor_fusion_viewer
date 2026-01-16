@@ -274,15 +274,7 @@ export function updateDisplay(frameIndex: number): void {
   // Compute from current frame's IMU data using FusionCompass (Chapter 7)
   if (ahrs && frame.imu) {
     // Get calibrated accel and mag for this frame
-    const imuCal = ahrs.getIMUCalibration();
     const magCal = ahrs.getMagCalibration();
-    
-    // Calibrate accelerometer
-   // const accelCal = {
-   //   x: frame.imu.ax - imuCal.accelOffsetX,
-   //   y: frame.imu.ay - imuCal.accelOffsetY,
-   //   z: frame.imu.az - imuCal.accelOffsetZ
-   // };
     
     // Only compute compass heading if we have valid mag data
     if (frame.mag) {

@@ -52,6 +52,9 @@ import { handleExportFusedData } from './fusedDataExport';
 import { computeIntegration } from './accelerationIntegration';
 import { initializeCharts, updateComponentChart, destroyCharts } from './integrationCharts';
 
+// GPS Integration
+import { initializeGPSUI, onSensorFileLoaded, onIntegrationStartTimeChange } from './gpsUIHandler';
+
 // ============================================================================
 // Initialization
 // ============================================================================
@@ -74,6 +77,9 @@ function init(): void {
   
   // Initialize calibration executive (handles save/load and status tracking)
   initializeCalibrationExecutive();
+  
+  // Initialize GPS UI
+  initializeGPSUI();
   
   // Initialize both AHRS algorithms
   const calConfig = getInitialCalibrationConfig();
@@ -220,6 +226,9 @@ async function handleFileSelect(event: Event): Promise<void> {
     const content = await file.text();
     state.dataset = parseCSV(content);
     state.currentFileName = file.name;
+    
+    // Store raw CSV for GPS timestamp sync
+    onSensorFileLoaded(content);
     
     debug.log(`Loaded ${state.dataset.readings.length} sensor readings`);
     debug.log(`Firmware: ${state.dataset.firmwareVersion}`);
@@ -486,6 +495,13 @@ function handleIntegrationStartChange(): void {
   const elements = getElements();
   const value = parseFloat(elements.integrationStartSlider.value);
   elements.integrationStartTime.textContent = value.toFixed(3) + 's';
+  
+  // Update app state with absolute time
+  const datasetStartTime = parseFloat(elements.integrationStartSlider.dataset.startTime || '0');
+  state.integrationStartTime = datasetStartTime + value;
+  
+  // Update GPS integration if loaded
+  onIntegrationStartTimeChange();
 }
 
 /**

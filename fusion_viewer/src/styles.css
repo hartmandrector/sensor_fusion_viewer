@@ -738,6 +738,66 @@ input[type="range"]:disabled::-webkit-slider-thumb {
   min-height: 0;
 }
 
+/* Top-Down Chart Special Layout - Legend on left, chart on right */
+.top-down-container {
+  flex-direction: row !important;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.top-down-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 100px;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.top-down-sidebar h3 {
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+}
+
+.top-down-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.top-down-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.top-down-legend-color {
+  width: 16px;
+  height: 3px;
+  flex-shrink: 0;
+}
+
+.top-down-legend-label {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.top-down-chart-wrapper {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.top-down-chart-wrapper canvas {
+  /* Let Chart.js control sizing - don't force stretch */
+  max-width: 100%;
+  max-height: 100%;
+}
+
 .back-to-viewer-btn {
   background: var(--bg-section);
   color: var(--text-primary);
