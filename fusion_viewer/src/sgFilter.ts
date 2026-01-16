@@ -173,7 +173,7 @@ export function smoothVelocities<T extends VelocityPoint>(
  * Default window sizes for GPS velocity smoothing
  * Uses 3-pass with decreasing window sizes: 25, 21, 11
  */
-export const DEFAULT_GPS_SMOOTHING_WINDOWS: SGWindowSize[] = [25, 21, 11];
+export const DEFAULT_GPS_SMOOTHING_WINDOWS: SGWindowSize[] = [21, 11, 7];
 
 /**
  * Smooth GPS velocities with default settings

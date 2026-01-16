@@ -97,6 +97,42 @@ export function getGPSComponentData(
 }
 
 /**
+ * Extract smoothed velocity data from GPS integration result
+ * Only returns data for velocity components, null otherwise
+ */
+export function getGPSSmoothVelocityData(
+  gpsResult: GPSIntegrationResult,
+  component: ComponentType
+): { time: number[]; values: number[]; label: string; unit: string } | null {
+  const points = gpsResult.points;
+  const time = points.map(p => p.sensorTime);
+  
+  let values: number[];
+  let label: string;
+  const unit = 'm/s';
+  
+  switch (component) {
+    case 'vel-north':
+      values = points.map(p => p.smoothVelNorth);
+      label = 'GPS Smooth Vel North';
+      break;
+    case 'vel-west':
+      values = points.map(p => p.smoothVelWest);
+      label = 'GPS Smooth Vel West';
+      break;
+    case 'vel-up':
+      values = points.map(p => p.smoothVelUp);
+      label = 'GPS Smooth Vel Up';
+      break;
+    default:
+      // Only velocity components have smoothed data
+      return null;
+  }
+  
+  return { time, values, label, unit };
+}
+
+/**
  * Create GPS dataset for component chart (time series)
  */
 export function createGPSComponentDataset(

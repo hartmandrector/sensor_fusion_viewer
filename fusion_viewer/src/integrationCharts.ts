@@ -25,7 +25,8 @@ import {
   createGPSProfileDataset, 
   createGPSSpeedDataset,
   createGPSStartMarker,
-  getGPSComponentData
+  getGPSComponentData,
+  getGPSSmoothVelocityData
 } from './gpsCharts';
 import { getGPSDataForCharts } from './gpsIntegration';
 
@@ -235,6 +236,31 @@ function createComponentChart(
             fill: false
           };
           config.data.datasets.push(gpsDataset as any);
+        }
+      }
+      
+      // Add smoothed GPS velocity if this is a velocity component
+      const smoothData = getGPSSmoothVelocityData(gpsResult, component);
+      if (smoothData && smoothData.values.length > 0) {
+        const smoothFiltered: { x: number; y: number }[] = [];
+        for (let i = 0; i < smoothData.time.length; i++) {
+          if (smoothData.time[i] >= timeOffset) {
+            smoothFiltered.push({ x: smoothData.time[i] - timeOffset, y: smoothData.values[i] });
+          }
+        }
+        
+        if (smoothFiltered.length > 0) {
+          const smoothDataset: ChartDataset<'scatter'> = {
+            label: smoothData.label,
+            data: smoothFiltered,
+            borderColor: '#00ff88',  // Green for smoothed
+            backgroundColor: 'rgba(0, 255, 136, 0.3)',
+            borderWidth: 1,
+            pointRadius: 1,
+            showLine: true,
+            fill: false
+          };
+          config.data.datasets.push(smoothDataset as any);
         }
       }
     }

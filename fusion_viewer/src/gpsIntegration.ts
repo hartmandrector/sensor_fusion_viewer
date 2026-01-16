@@ -162,8 +162,9 @@ export function convertGPSToIntegration(
   }
   
   // Calculate acceleration from smoothed velocity using linear regression
-  // Uses 20-point window for slope estimation (dVel/dTime = acceleration)
-  const ACCEL_WINDOW_SIZE = 20;
+  // Uses 21-point centered window for slope estimation (dVel/dTime = acceleration)
+  // Odd window size ensures symmetric centering around each point
+  const ACCEL_WINDOW_SIZE = 21;
   const accelerations = calculateAcceleration(
     points,
     ACCEL_WINDOW_SIZE,
