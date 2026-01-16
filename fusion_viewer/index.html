@@ -157,15 +157,15 @@
             <label for="useMagnetometer">Use Magnetometer (9-DOF)</label>
           </div>
           <div class="checkbox-control">
-            <input type="checkbox" id="showSensorVectors" />
+            <input type="checkbox" id="showSensorVectors" checked />
             <label for="showSensorVectors">Show sensor vectors (Accel/Mag/Gyro)</label>
           </div>
           <div class="checkbox-control">
-            <input type="checkbox" id="showLinearAccel" />
+            <input type="checkbox" id="showLinearAccel" checked />
             <label for="showLinearAccel">Show Linear Accel (L - pink)</label>
           </div>
           <div class="checkbox-control">
-            <input type="checkbox" id="showEarthAccel" />
+            <input type="checkbox" id="showEarthAccel" checked />
             <label for="showEarthAccel">Show Earth Accel (E - orange)</label>
           </div>
           <div class="checkbox-control">
@@ -365,6 +365,10 @@
             <div>Duration: <span id="duration">0.0</span>s</div>
             <div>IMU Rate: <span id="imuRate">0</span> Hz</div>
             <div>MAG Rate: <span id="magRate">0</span> Hz</div>
+            <div style="margin-top: 0.75rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.75rem;">
+              <div>Max Gyro: <span id="maxGyroMagnitude">0.0</span>°/s</div>
+              <div>Max Accel: <span id="maxAccelMagnitude">0.0</span>g</div>
+            </div>
           </div>
         </section>
 

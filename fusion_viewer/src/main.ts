@@ -109,6 +109,14 @@ function init(): void {
   // Show/hide fusion-specific settings
   updateFusionSettingsVisibility();
   
+  // Apply initial checkbox states to viewer
+  state.viewer.toggleSensorVectors(elements.showSensorVectors.checked);
+  state.viewer.toggleLinearAccel(elements.showLinearAccel.checked);
+  state.viewer.toggleEarthAccel(elements.showEarthAccel.checked);
+  state.viewer.toggleGravity(elements.showGravity.checked);
+  state.viewer.toggleHeading(elements.showHeading.checked);
+  state.viewer.toggleCompassHeading(elements.showCompassHeading.checked);
+  
   debug.log('FlySight Fusion Viewer initialized');
   debug.log(`Algorithm: ${state.algorithm}`);
 }
@@ -225,6 +233,8 @@ async function handleFileSelect(event: Event): Promise<void> {
     elements.duration.textContent = state.dataset.duration.toFixed(2);
     elements.imuRate.textContent = state.dataset.imuRate.toString();
     elements.magRate.textContent = state.dataset.magRate.toString();
+    elements.maxGyroMagnitude.textContent = state.dataset.maxGyroMagnitude.toFixed(1);
+    elements.maxAccelMagnitude.textContent = state.dataset.maxAccelMagnitude.toFixed(2);
     elements.totalTime.textContent = state.dataset.duration.toFixed(3) + 's';
     
     // Pre-compute fusion frames

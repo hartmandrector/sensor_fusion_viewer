@@ -107,6 +107,8 @@ export interface UIElements {
   duration: HTMLSpanElement;
   imuRate: HTMLSpanElement;
   magRate: HTMLSpanElement;
+  maxGyroMagnitude: HTMLSpanElement;
+  maxAccelMagnitude: HTMLSpanElement;
   
   // IMU calibration
   gyroBiasX: HTMLInputElement;
@@ -264,6 +266,8 @@ export function initializeElements(): UIElements {
     duration: getElement<HTMLSpanElement>('duration'),
     imuRate: getElement<HTMLSpanElement>('imuRate'),
     magRate: getElement<HTMLSpanElement>('magRate'),
+    maxGyroMagnitude: getElement<HTMLSpanElement>('maxGyroMagnitude'),
+    maxAccelMagnitude: getElement<HTMLSpanElement>('maxAccelMagnitude'),
     
     // IMU calibration
     gyroBiasX: getElement<HTMLInputElement>('gyroBiasX'),

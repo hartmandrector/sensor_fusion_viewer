@@ -63,6 +63,8 @@ export interface SensorDataset {
   baroCount: number;
   imuRate: number;  // Hz
   magRate: number;  // Hz
+  maxGyroMagnitude: number;  // deg/s
+  maxAccelMagnitude: number;  // g
 }
 
 /**
@@ -83,7 +85,9 @@ export function parseCSV(content: string): SensorDataset {
     magCount: 0,
     baroCount: 0,
     imuRate: 0,
-    magRate: 0
+    magRate: 0,
+    maxGyroMagnitude: 0,
+    maxAccelMagnitude: 0
   };
   
   let inDataSection = false;
@@ -127,10 +131,16 @@ export function parseCSV(content: string): SensorDataset {
     if (reading) {
       dataset.readings.push(reading);
       
-      // Count by type
+      // Count by type and track maximums
       switch (reading.type) {
         case 'IMU':
           dataset.imuCount++;
+          // Calculate gyro magnitude (values are already in deg/s from CSV)
+          const gyroMag = Math.sqrt(reading.wx ** 2 + reading.wy ** 2 + reading.wz ** 2);
+          dataset.maxGyroMagnitude = Math.max(dataset.maxGyroMagnitude, gyroMag);
+          // Calculate accel magnitude
+          const accelMag = Math.sqrt(reading.ax ** 2 + reading.ay ** 2 + reading.az ** 2);
+          dataset.maxAccelMagnitude = Math.max(dataset.maxAccelMagnitude, accelMag);
           break;
         case 'MAG':
           dataset.magCount++;
