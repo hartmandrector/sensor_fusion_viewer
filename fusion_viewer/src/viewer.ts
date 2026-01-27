@@ -11,6 +11,7 @@ import type { Quaternion } from './types';
 import type { MAGData } from './csvParser';
 import { COLORS, DEVICE_DIMENSIONS, SCREEN_INSET, SCREEN_DEPTH_OFFSET } from './constants';
 import { createCurvedArrow, disposeCurvedArrow } from './curvedArrow';
+import { createShadedArrow, disposeShadedArrow } from './shadedArrow';
 
 export class OrientationViewer {
   private container: HTMLElement;
@@ -25,37 +26,37 @@ export class OrientationViewer {
   private showingMagPlot: boolean = false;
   private showingIMUPlot: boolean = false;
   
-  // Sensor vector visualization
+  // Sensor vector visualization (using shaded arrows for proper lighting)
   private sensorVectorsGroup: THREE.Group;
-  private accelArrow: THREE.ArrowHelper | null = null;
+  private accelArrow: THREE.Group | null = null;
   private accelLabel: THREE.Sprite | null = null;
-  private magArrow: THREE.ArrowHelper | null = null;
+  private magArrow: THREE.Group | null = null;
   private magLabel: THREE.Sprite | null = null;
-  private magWorldArrow: THREE.ArrowHelper | null = null;  // Mag in world frame
+  private magWorldArrow: THREE.Group | null = null;  // Mag in world frame
   private magWorldLabel: THREE.Sprite | null = null;
   private magWorldDirection: THREE.Vector3 | null = null;  // Store for heading calculation
   private showSensorVectors: boolean = false;
   
   // Linear and Earth acceleration vectors
-  private linearAccelArrow: THREE.ArrowHelper | null = null;
+  private linearAccelArrow: THREE.Group | null = null;
   private linearAccelLabel: THREE.Sprite | null = null;
-  private earthAccelArrow: THREE.ArrowHelper | null = null;
+  private earthAccelArrow: THREE.Group | null = null;
   private earthAccelLabel: THREE.Sprite | null = null;
   private showLinearAccel: boolean = false;
   private showEarthAccel: boolean = false;
   
   // AHRS gravity vector (estimated gravity direction in body frame)
-  private gravityArrow: THREE.ArrowHelper | null = null;
+  private gravityArrow: THREE.Group | null = null;
   private gravityLabel: THREE.Sprite | null = null;
   private showGravity: boolean = false;
   
   // Heading vector (magnetometer compass heading in world frame)
-  private headingArrow: THREE.ArrowHelper | null = null;
+  private headingArrow: THREE.Group | null = null;
   private headingLabel: THREE.Sprite | null = null;
   private showHeading: boolean = false;
   
   // Compass heading vector (FusionCompass algorithm)
-  private compassHeadingArrow: THREE.ArrowHelper | null = null;
+  private compassHeadingArrow: THREE.Group | null = null;
   private compassHeadingLabel: THREE.Sprite | null = null;
   private showCompassHeading: boolean = false;
   
@@ -63,6 +64,13 @@ export class OrientationViewer {
   private gyroArrowX: THREE.Group | null = null;
   private gyroArrowY: THREE.Group | null = null;
   private gyroArrowZ: THREE.Group | null = null;
+  
+  // Rejection mode visualization arrows (show expected vs measured during rejection)
+  // These use basic ArrowHelper (non-shaded) to visually distinguish from sensor vectors
+  private expectedGravityArrow: THREE.ArrowHelper | null = null;
+  private expectedGravityLabel: THREE.Sprite | null = null;
+  private expectedMagArrow: THREE.ArrowHelper | null = null;
+  private expectedMagLabel: THREE.Sprite | null = null;
   
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -353,7 +361,7 @@ export class OrientationViewer {
     this.scene.add(mainLight);
     
     // Fill light
-    const fillLight = new THREE.DirectionalLight(0x4488ff, 0.3);
+    const fillLight = new THREE.DirectionalLight(0x4488ff, 0.8);
     fillLight.position.set(-5, 0, -5);
     this.scene.add(fillLight);
   }
@@ -849,7 +857,7 @@ export class OrientationViewer {
     // Remove old heading arrow
     if (this.headingArrow) {
       this.scene.remove(this.headingArrow);
-      this.headingArrow.dispose();
+      disposeShadedArrow(this.headingArrow);
       this.headingArrow = null;
     }
     if (this.headingLabel) {
@@ -884,13 +892,11 @@ export class OrientationViewer {
       const arrowLength = 2.0;
       
       // Create heading arrow (green color for visibility)
-      this.headingArrow = new THREE.ArrowHelper(
+      this.headingArrow = createShadedArrow(
         headingDir,
         new THREE.Vector3(0, 0, 0),
         arrowLength,
-        0x00ff00,  // Green
-        0.2,
-        0.1
+        0x00ff00  // Green
       );
       this.scene.add(this.headingArrow);
       
@@ -916,7 +922,7 @@ export class OrientationViewer {
     // Remove old compass heading arrow
     if (this.compassHeadingArrow) {
       this.scene.remove(this.compassHeadingArrow);
-      this.compassHeadingArrow.dispose();
+      disposeShadedArrow(this.compassHeadingArrow);
       this.compassHeadingArrow = null;
     }
     if (this.compassHeadingLabel) {
@@ -949,13 +955,11 @@ export class OrientationViewer {
     const arrowLength = 2.0;
     
     // Create compass heading arrow (yellow/lime color to differentiate from magnetometer)
-    this.compassHeadingArrow = new THREE.ArrowHelper(
+    this.compassHeadingArrow = createShadedArrow(
       headingDir,
       new THREE.Vector3(0, 0, 0),
       arrowLength,
-      0xffff00,  // Yellow
-      0.15,
-      0.08
+      0xffff00  // Yellow
     );
     this.scene.add(this.compassHeadingArrow);
     
@@ -985,7 +989,7 @@ export class OrientationViewer {
     // Remove old arrows
     if (this.accelArrow) {
       this.sensorVectorsGroup.remove(this.accelArrow);
-      this.accelArrow.dispose();
+      disposeShadedArrow(this.accelArrow);
     }
     if (this.accelLabel) {
       this.sensorVectorsGroup.remove(this.accelLabel);
@@ -994,7 +998,7 @@ export class OrientationViewer {
     }
     if (this.magArrow) {
       this.sensorVectorsGroup.remove(this.magArrow);
-      this.magArrow.dispose();
+      disposeShadedArrow(this.magArrow);
     }
     if (this.magLabel) {
       this.sensorVectorsGroup.remove(this.magLabel);
@@ -1003,7 +1007,7 @@ export class OrientationViewer {
     }
     if (this.magWorldArrow) {
       this.scene.remove(this.magWorldArrow);
-      this.magWorldArrow.dispose();
+      disposeShadedArrow(this.magWorldArrow);
       this.magWorldArrow = null;
     }
     if (this.magWorldLabel) {
@@ -1043,13 +1047,11 @@ export class OrientationViewer {
     const accelDir = accelLocal.clone().normalize();
     const accelLength = accelLocal.length();
     const accelArrowLength = accelLength * 1.5;
-    this.accelArrow = new THREE.ArrowHelper(
+    this.accelArrow = createShadedArrow(
       accelDir,
       new THREE.Vector3(0, 0, 0),
-      accelArrowLength,  // Scale for visibility
-      0xffff00,  // Yellow
-      0.2,
-      0.1
+      accelArrowLength,
+      0xffff00  // Yellow
     );
     this.sensorVectorsGroup.add(this.accelArrow);
     
@@ -1064,13 +1066,11 @@ export class OrientationViewer {
       const magDir = magLocal.clone().normalize();
       const magLength = magLocal.length();
       const magArrowLength = magLength * 3.0;
-      this.magArrow = new THREE.ArrowHelper(
+      this.magArrow = createShadedArrow(
         magDir,
         new THREE.Vector3(0, 0, 0),
-        magArrowLength,  // Scale for visibility (mag values are smaller)
-        0xff00ff,  // Magenta - body frame
-        0.2,
-        0.1
+        magArrowLength,
+        0xff00ff  // Magenta - body frame
       );
       this.sensorVectorsGroup.add(this.magArrow);
       
@@ -1090,13 +1090,11 @@ export class OrientationViewer {
       this.magWorldDirection = magWorldDir.clone();
       
       const magWorldArrowLength = magLength * 3.0;
-      this.magWorldArrow = new THREE.ArrowHelper(
+      this.magWorldArrow = createShadedArrow(
         magWorldDir,
         new THREE.Vector3(0, 0, 0),
         magWorldArrowLength,
-        0x00ffff,  // Cyan - world frame
-        0.2,
-        0.1
+        0x00ffff  // Cyan - world frame
       );
       this.scene.add(this.magWorldArrow);
       
@@ -1151,7 +1149,7 @@ export class OrientationViewer {
     // Clean up old arrows
     if (this.linearAccelArrow) {
       this.sensorVectorsGroup.remove(this.linearAccelArrow);
-      this.linearAccelArrow.dispose();
+      disposeShadedArrow(this.linearAccelArrow);
       this.linearAccelArrow = null;
     }
     if (this.linearAccelLabel) {
@@ -1161,7 +1159,7 @@ export class OrientationViewer {
     }
     if (this.earthAccelArrow) {
       this.scene.remove(this.earthAccelArrow);
-      this.earthAccelArrow.dispose();
+      disposeShadedArrow(this.earthAccelArrow);
       this.earthAccelArrow = null;
     }
     if (this.earthAccelLabel) {
@@ -1171,7 +1169,7 @@ export class OrientationViewer {
     }
     if (this.gravityArrow) {
       this.scene.remove(this.gravityArrow);  // Remove from scene, not sensorVectorsGroup
-      this.gravityArrow.dispose();
+      disposeShadedArrow(this.gravityArrow);
       this.gravityArrow = null;
     }
     if (this.gravityLabel) {
@@ -1213,13 +1211,11 @@ export class OrientationViewer {
         const linearDir = linearLocal.clone().normalize();
         const linearArrowLength = Math.min(linearMag * 3.0, 2.0);  // Scale and cap length
         
-        this.linearAccelArrow = new THREE.ArrowHelper(
+        this.linearAccelArrow = createShadedArrow(
           linearDir,
           new THREE.Vector3(0, 0, 0),
           linearArrowLength,
-          0xff69b4,  // Pink (Hot Pink)
-          0.15,
-          0.08
+          0xff69b4  // Pink (Hot Pink)
         );
         this.sensorVectorsGroup.add(this.linearAccelArrow);
         
@@ -1243,13 +1239,11 @@ export class OrientationViewer {
         const earthDir = earthWorld.clone().normalize();
         const earthArrowLength = Math.min(earthMag * 3.0, 2.0);  // Scale and cap length
         
-        this.earthAccelArrow = new THREE.ArrowHelper(
+        this.earthAccelArrow = createShadedArrow(
           earthDir,
           new THREE.Vector3(0, 0, 0),
           earthArrowLength,
-          0xffa500,  // Orange
-          0.15,
-          0.08
+          0xffa500  // Orange
         );
         this.scene.add(this.earthAccelArrow);  // Add to scene, not device group
         
@@ -1278,13 +1272,11 @@ export class OrientationViewer {
       const gravDir = gravWorld.normalize();
       const gravArrowLength = 1.5;
       
-      this.gravityArrow = new THREE.ArrowHelper(
+      this.gravityArrow = createShadedArrow(
         gravDir,
         new THREE.Vector3(0, 0, 0),
         gravArrowLength,
-        0x00ffff,  // Cyan - distinct from yellow raw accel
-        0.15,
-        0.08
+        0x00ffff  // Cyan - distinct from yellow raw accel
       );
       this.scene.add(this.gravityArrow);  // Add to scene, NOT sensorVectorsGroup
       
@@ -1292,6 +1284,105 @@ export class OrientationViewer {
       this.gravityLabel = this.createTextLabel('Gv', '#00ffff');
       this.gravityLabel.position.copy(gravDir.clone().multiplyScalar(gravArrowLength + 0.15));
       this.scene.add(this.gravityLabel);  // Add to scene, NOT sensorVectorsGroup
+    }
+  }
+  
+  /**
+   * Update rejection mode visualization vectors.
+   * Shows where the AHRS expects gravity/magnetic to point vs where sensors measure them.
+   * Only visible when the corresponding sensor is being rejected (ignored).
+   * 
+   * @param expectedGravity AHRS-expected gravity direction in body frame (from getGravity)
+   * @param expectedMag AHRS-expected magnetic direction in body frame (from getMagneticReference)
+   * @param accelIgnored True if accelerometer is currently being rejected
+   * @param magIgnored True if magnetometer is currently being rejected
+   */
+  updateRejectionVectors(
+    expectedGravity: { x: number; y: number; z: number } | null,
+    expectedMag: { x: number; y: number; z: number } | null,
+    accelIgnored: boolean,
+    magIgnored: boolean
+  ): void {
+    // Transform from NWU sensor frame to Three.js local frame
+    // Device X = left → Three.js -X, Device Y = up → +Y, Device Z = forward → -Z
+    const sensorToLocal = (v: { x: number; y: number; z: number }) => {
+      return new THREE.Vector3(-v.x, v.y, -v.z);
+    };
+    
+    // =========================================================================
+    // Expected Gravity (only shown during accel rejection)
+    // =========================================================================
+    // Clean up old arrow
+    if (this.expectedGravityArrow) {
+      this.sensorVectorsGroup.remove(this.expectedGravityArrow);
+      this.expectedGravityArrow.dispose();
+      this.expectedGravityArrow = null;
+    }
+    if (this.expectedGravityLabel) {
+      this.sensorVectorsGroup.remove(this.expectedGravityLabel);
+      this.disposeLabel(this.expectedGravityLabel);
+      this.expectedGravityLabel = null;
+    }
+    
+    // Only show when accelerometer is being rejected
+    if (accelIgnored && expectedGravity) {
+      const gravLocal = sensorToLocal(expectedGravity);
+      const gravDir = gravLocal.clone().normalize();
+      const gravLength = 1.5;  // Match accel arrow length
+      
+      // Use orange-gold color to distinguish from yellow measured accel
+      this.expectedGravityArrow = new THREE.ArrowHelper(
+        gravDir,
+        new THREE.Vector3(0, 0, 0),
+        gravLength,
+        0xffa000,  // Orange-gold
+        0.2,       // Head length
+        0.1        // Head width
+      );
+      this.sensorVectorsGroup.add(this.expectedGravityArrow);
+      
+      // Add "Ge" label (Gravity Expected)
+      this.expectedGravityLabel = this.createTextLabel('Ge', '#ffa000');
+      this.expectedGravityLabel.position.copy(gravDir.clone().multiplyScalar(gravLength + 0.15));
+      this.sensorVectorsGroup.add(this.expectedGravityLabel);
+    }
+    
+    // =========================================================================
+    // Expected Magnetic (only shown during mag rejection)
+    // =========================================================================
+    // Clean up old arrow
+    if (this.expectedMagArrow) {
+      this.sensorVectorsGroup.remove(this.expectedMagArrow);
+      this.expectedMagArrow.dispose();
+      this.expectedMagArrow = null;
+    }
+    if (this.expectedMagLabel) {
+      this.sensorVectorsGroup.remove(this.expectedMagLabel);
+      this.disposeLabel(this.expectedMagLabel);
+      this.expectedMagLabel = null;
+    }
+    
+    // Only show when magnetometer is being rejected
+    if (magIgnored && expectedMag) {
+      const magLocal = sensorToLocal(expectedMag);
+      const magDir = magLocal.clone().normalize();
+      const magLength = 1.5;  // Similar to mag arrow
+      
+      // Use purple color to distinguish from magenta measured mag
+      this.expectedMagArrow = new THREE.ArrowHelper(
+        magDir,
+        new THREE.Vector3(0, 0, 0),
+        magLength,
+        0x9900ff,  // Purple
+        0.2,       // Head length
+        0.1        // Head width
+      );
+      this.sensorVectorsGroup.add(this.expectedMagArrow);
+      
+      // Add "Me" label (Magnetic Expected)
+      this.expectedMagLabel = this.createTextLabel('Me', '#9900ff');
+      this.expectedMagLabel.position.copy(magDir.clone().multiplyScalar(magLength + 0.15));
+      this.sensorVectorsGroup.add(this.expectedMagLabel);
     }
   }
   

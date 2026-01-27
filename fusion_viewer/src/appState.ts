@@ -100,6 +100,9 @@ export interface FusionFrame {
   linearAccel?: { x: number; y: number; z: number };
   earthAccel?: { x: number; y: number; z: number };
   gravity?: { x: number; y: number; z: number };
+  // Expected reference vectors (for rejection visualization)
+  expectedGravity?: { x: number; y: number; z: number };
+  expectedMag?: { x: number; y: number; z: number };
   // Fusion Ch.7 specific
   internalStates?: FusionInternalStates;
   biasState?: BiasState;

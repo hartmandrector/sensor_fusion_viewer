@@ -47,6 +47,8 @@ export interface UIElements {
   accelRejectValue: HTMLSpanElement;
   magRejectSlider: HTMLInputElement;
   magRejectValue: HTMLSpanElement;
+  recoveryTimeSlider: HTMLInputElement;
+  recoveryTimeValue: HTMLSpanElement;
   accelStatus: HTMLSpanElement;
   accelError: HTMLSpanElement;
   magStatus: HTMLSpanElement;
@@ -206,6 +208,8 @@ export function initializeElements(): UIElements {
     accelRejectValue: getElement<HTMLSpanElement>('accelRejectValue'),
     magRejectSlider: getElement<HTMLInputElement>('magRejectSlider'),
     magRejectValue: getElement<HTMLSpanElement>('magRejectValue'),
+    recoveryTimeSlider: getElement<HTMLInputElement>('recoveryTimeSlider'),
+    recoveryTimeValue: getElement<HTMLSpanElement>('recoveryTimeValue'),
     accelStatus: getElement<HTMLSpanElement>('accelStatus'),
     accelError: getElement<HTMLSpanElement>('accelError'),
     magStatus: getElement<HTMLSpanElement>('magStatus'),

@@ -75,6 +75,9 @@ export interface FusionAdapterSettings {
   
   /** Enable runtime bias estimation */
   enableBiasEstimation: boolean;
+  
+  /** Recovery time in seconds (used to calculate recoveryTriggerPeriod based on IMU rate) */
+  recoveryTimeSeconds?: number;
 }
 
 export const DEFAULT_ADAPTER_SETTINGS: FusionAdapterSettings = {
@@ -83,10 +86,11 @@ export const DEFAULT_ADAPTER_SETTINGS: FusionAdapterSettings = {
     gyroscopeRange: 2000,        // FlySight default ±2000°/s
     accelerationRejection: 10,   // 10° threshold
     magneticRejection: 10,       // 10° threshold
-    recoveryTriggerPeriod: 416 * 5  // 5 seconds at 416Hz (~2080 samples)
+    recoveryTriggerPeriod: 416 * 5  // 5 seconds at 416Hz (~2080 samples) - recalculated based on IMU rate
   },
   bias: {},
-  enableBiasEstimation: true      // Ch.7 algorithm estimates bias during initial gain ramp
+  enableBiasEstimation: true,     // Ch.7 algorithm estimates bias during initial gain ramp
+  recoveryTimeSeconds: 5          // Recovery time in seconds (used to calculate recoveryTriggerPeriod)
 };
 
 // ============================================================================
@@ -667,7 +671,14 @@ export class FusionAhrsAdapter {
   getGravity(): FusionVector {
     return this.getGravityVector();
   }
-  
+  /**
+   * Get expected magnetic reference direction in body frame.
+   * This is where the algorithm expects the magnetic field to point
+   * based on the current orientation estimate.
+   */
+  getMagneticReference(): FusionVector {
+    return this.ahrs.getMagneticReference();
+  }  
   /**
    * Get internal states for diagnostics
    */

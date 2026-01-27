@@ -87,6 +87,13 @@ export function createCurvedArrow(
     return group;
   }
   
+  // Create shared material with proper shading (same as device axis arrows)
+  const material = new THREE.MeshPhongMaterial({
+    color,
+    specular: 0x444444,
+    shininess: 30
+  });
+  
   // Create the arc using TubeGeometry for consistent thickness
   const arcCurve = new ArcCurve(axis, opts.radius, 0, clampedAngle);
   const tubeGeometry = new THREE.TubeGeometry(
@@ -96,14 +103,12 @@ export function createCurvedArrow(
     8,                  // radial segments
     false               // not closed
   );
-  const tubeMaterial = new THREE.MeshBasicMaterial({ color });
-  const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+  const tube = new THREE.Mesh(tubeGeometry, material);
   group.add(tube);
   
   // Create arrowhead cone at the end of the arc
   const coneGeometry = new THREE.ConeGeometry(opts.headRadius, opts.headLength, 8);
-  const coneMaterial = new THREE.MeshBasicMaterial({ color });
-  const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+  const cone = new THREE.Mesh(coneGeometry, material);
   
   // Position cone at the end of the arc
   const endPoint = arcCurve.getPoint(1);

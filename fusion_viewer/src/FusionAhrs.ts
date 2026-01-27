@@ -620,6 +620,34 @@ export class FusionAhrs {
       z: 2 * (q.w * q.w - 0.5 + q.z * q.z)
     };
   }
+
+  /**
+   * Get expected magnetic reference direction in sensor frame.
+   * This returns the expected NORTH direction in body frame based on the current
+   * quaternion estimate. In NWU convention, North is +X in Earth frame.
+   * 
+   * Computed as: North = cross(Up, West) - trying reversed order.
+   * This gives where the horizontal magnetic field component should point.
+   */
+  getMagneticReference(): FusionVector {
+    // Get West direction in body frame (2× halfMagnetic)
+    const q = this.quaternion;
+    const west: FusionVector = {
+      x: 2 * (q.x * q.y + q.w * q.z),
+      y: 2 * (q.w * q.w - 0.5 + q.y * q.y),
+      z: 2 * (q.y * q.z - q.w * q.x)
+    };
+    
+    // Get Up direction in body frame (2× halfGravity, which is the accel reaction)
+    const up: FusionVector = {
+      x: 2 * (q.x * q.z - q.w * q.y),
+      y: 2 * (q.w * q.x + q.y * q.z),
+      z: 2 * (q.w * q.w - 0.5 + q.z * q.z)
+    };
+    
+    // North = cross(Up, West) - reversed from before
+    return vectorCross(west, up);
+  }
   
   /**
    * Get linear acceleration in sensor frame (accelerometer minus gravity)

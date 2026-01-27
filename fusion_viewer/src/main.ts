@@ -89,6 +89,7 @@ function init(): void {
   const gain = parseFloat(elements.betaSlider.value);
   const accelReject = parseFloat(elements.accelRejectSlider.value);
   const magReject = parseFloat(elements.magRejectSlider.value);
+  const recoveryTime = parseFloat(elements.recoveryTimeSlider.value);
   
   // Create both algorithms
   state.madgwickAhrs = new MadgwickAHRS({
@@ -104,7 +105,8 @@ function init(): void {
         accelerationRejection: accelReject,
         magneticRejection: magReject,
         gyroscopeRange: 2000
-      } 
+      },
+      recoveryTimeSeconds: recoveryTime
     }
   );
   
@@ -164,6 +166,7 @@ function setupEventListeners(): void {
   // Fusion Ch.7 specific
   elements.accelRejectSlider.addEventListener('input', handleAccelRejectChange);
   elements.magRejectSlider.addEventListener('input', handleMagRejectChange);
+  elements.recoveryTimeSlider.addEventListener('input', handleRecoveryTimeChange);
   
   // Axis remapping
   elements.imuRemapX.addEventListener('change', handleAxisRemapChange);
@@ -245,6 +248,14 @@ async function handleFileSelect(event: Event): Promise<void> {
     elements.maxGyroMagnitude.textContent = state.dataset.maxGyroMagnitude.toFixed(1);
     elements.maxAccelMagnitude.textContent = state.dataset.maxAccelMagnitude.toFixed(2);
     elements.totalTime.textContent = state.dataset.duration.toFixed(3) + 's';
+    
+    // Update recovery trigger period based on actual IMU rate
+    const recoveryTimeSeconds = parseFloat(elements.recoveryTimeSlider.value);
+    const recoveryTriggerPeriod = Math.round(state.dataset.imuRate * recoveryTimeSeconds);
+    debug.log(`Recovery trigger: ${recoveryTimeSeconds}s @ ${state.dataset.imuRate}Hz = ${recoveryTriggerPeriod} samples`);
+    if (state.fusionAhrs) {
+      state.fusionAhrs.updateAhrsSettings({ recoveryTriggerPeriod });
+    }
     
     // Pre-compute fusion frames
     computeFusionFrames();
@@ -370,6 +381,31 @@ function handleMagRejectChange(): void {
     state.fusionAhrs.updateAhrsSettings({ magneticRejection: value });
     
     if (state.dataset && state.algorithm === 'fusion') {
+      computeFusionFrames();
+      updateDisplay(state.playbackIndex);
+    }
+  }
+}
+
+/**
+ * Handle recovery time change
+ * Calculates recoveryTriggerPeriod from IMU rate and recovery time in seconds
+ */
+function handleRecoveryTimeChange(): void {
+  const elements = getElements();
+  const recoveryTimeSeconds = parseFloat(elements.recoveryTimeSlider.value);
+  elements.recoveryTimeValue.textContent = recoveryTimeSeconds.toFixed(1);
+  
+  if (state.fusionAhrs && state.dataset) {
+    // Calculate recovery trigger period from IMU rate
+    const imuRate = state.dataset.imuRate;
+    const recoveryTriggerPeriod = Math.round(imuRate * recoveryTimeSeconds);
+    
+    debug.log(`Recovery time: ${recoveryTimeSeconds}s @ ${imuRate}Hz = ${recoveryTriggerPeriod} samples`);
+    
+    state.fusionAhrs.updateAhrsSettings({ recoveryTriggerPeriod });
+    
+    if (state.algorithm === 'fusion') {
       computeFusionFrames();
       updateDisplay(state.playbackIndex);
     }

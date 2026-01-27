@@ -79,7 +79,10 @@ export function computeFusionFrames(): void {
         // Store acceleration vectors computed from current AHRS state
         linearAccel: ahrs.getLinearAcceleration(),
         earthAccel: ahrs.getEarthAcceleration(),
-        gravity: ahrs.getGravityVector()
+        gravity: ahrs.getGravityVector(),
+        // Store expected reference vectors for rejection visualization
+        expectedGravity: ahrs.getGravityVector(),  // Same as gravity (expected direction)
+        expectedMag: fusionAhrs?.getMagneticReference()
       };
       
       // Add Fusion-specific states if using Fusion algorithm
@@ -325,6 +328,16 @@ export function updateDisplay(frameIndex: number): void {
       frame.linearAccel || null,
       frame.earthAccel || null,
       frame.gravity || null
+    );
+    
+    // Update rejection visualization vectors (only visible during rejection)
+    const accelIgnored = frame.internalStates?.accelerometerIgnored ?? false;
+    const magIgnored = frame.internalStates?.magnetometerIgnored ?? false;
+    viewer.updateRejectionVectors(
+      frame.expectedGravity || null,
+      frame.expectedMag || null,
+      accelIgnored,
+      magIgnored
     );
   }
   
