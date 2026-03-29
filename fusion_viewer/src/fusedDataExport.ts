@@ -8,11 +8,14 @@
  * - Raw accelerometer (body frame)
  * - Earth-frame acceleration (gravity removed)
  * - Gravity vector
+ * - GPS data (when loaded): position, velocity, acceleration, lat/lon/alt
  */
 
 import { state, FusionFrame } from './appState';
 import { getElements } from './uiElements';
 import { debug } from './constants';
+import { gpsState } from './gpsIntegration';
+import type { GPSIntegrationPoint } from './gpsTypes';
 
 // ============================================================================
 // Quaternion to Rotation Matrix
@@ -67,14 +70,77 @@ function rotateToEarthFrame(
 }
 
 // ============================================================================
+// GPS Interpolation
+// ============================================================================
+
+/**
+ * Linearly interpolate a GPS value at a given sensor timestamp.
+ * Returns null if timestamp is outside GPS coverage.
+ */
+function interpolateGPSAtTime(
+  gpsPoints: GPSIntegrationPoint[],
+  t: number
+): GPSIntegrationPoint | null {
+  if (gpsPoints.length === 0) return null;
+  if (t < gpsPoints[0].sensorTime || t > gpsPoints[gpsPoints.length - 1].sensorTime) return null;
+
+  // Binary search for bracketing interval
+  let lo = 0, hi = gpsPoints.length - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (gpsPoints[mid].sensorTime <= t) lo = mid;
+    else hi = mid;
+  }
+
+  const a = gpsPoints[lo];
+  const b = gpsPoints[hi];
+  const dt = b.sensorTime - a.sensorTime;
+  if (dt <= 0) return a;
+
+  const frac = (t - a.sensorTime) / dt;
+
+  // Lerp all numeric fields
+  const lerp = (va: number, vb: number) => va + (vb - va) * frac;
+
+  return {
+    sensorTime: t,
+    velNorth: lerp(a.velNorth, b.velNorth),
+    velWest: lerp(a.velWest, b.velWest),
+    velUp: lerp(a.velUp, b.velUp),
+    smoothVelNorth: lerp(a.smoothVelNorth, b.smoothVelNorth),
+    smoothVelWest: lerp(a.smoothVelWest, b.smoothVelWest),
+    smoothVelUp: lerp(a.smoothVelUp, b.smoothVelUp),
+    posNorth: lerp(a.posNorth, b.posNorth),
+    posWest: lerp(a.posWest, b.posWest),
+    posUp: lerp(a.posUp, b.posUp),
+    horizontalSpeed: lerp(a.horizontalSpeed, b.horizontalSpeed),
+    horizontalDistance: lerp(a.horizontalDistance, b.horizontalDistance),
+    smoothHorizontalSpeed: lerp(a.smoothHorizontalSpeed, b.smoothHorizontalSpeed),
+    accelNorth: lerp(a.accelNorth, b.accelNorth),
+    accelWest: lerp(a.accelWest, b.accelWest),
+    accelUp: lerp(a.accelUp, b.accelUp),
+    lat: lerp(a.lat, b.lat),
+    lon: lerp(a.lon, b.lon),
+    hMSL: lerp(a.hMSL, b.hMSL),
+    hAcc: lerp(a.hAcc, b.hAcc),
+    vAcc: lerp(a.vAcc, b.vAcc),
+    numSV: Math.round(lerp(a.numSV, b.numSV)),
+  };
+}
+
+// ============================================================================
 // CSV Generation
 // ============================================================================
 
 /**
- * Generate CSV content from fusion frames
+ * Generate CSV content from fusion frames, optionally merged with GPS data
  */
 function generateCSV(frames: FusionFrame[]): string {
   const rows: string[] = [];
+
+  // Check if GPS data is available
+  const gpsPoints = gpsState.integrationResult?.points ?? [];
+  const hasGPS = gpsPoints.length > 0;
   
   // Documentation header (comment lines starting with #)
   rows.push('# FlySight Sensor Fusion Export');
@@ -82,10 +148,15 @@ function generateCSV(frames: FusionFrame[]): string {
   rows.push(`# Algorithm: ${state.algorithm}`);
   rows.push(`# Source file: ${state.currentFileName || 'unknown'}`);
   rows.push(`# Frames: ${frames.length}`);
+  rows.push(`# GPS data: ${hasGPS ? `${gpsPoints.length} points` : 'not loaded'}`);
   rows.push('#');
   rows.push('# COORDINATE SYSTEMS:');
   rows.push('#   Earth Frame (NWU): X=North, Y=West, Z=Up (right-handed)');
   rows.push('#   Body Frame: Sensor-fixed frame, orientation depends on mounting');
+  if (hasGPS) {
+    rows.push('#   GPS columns use NWU frame, position relative to first GPS fix');
+    rows.push('#   GPS values interpolated to sensor timestamps (NaN = outside GPS coverage)');
+  }
   rows.push('#');
   rows.push('# COLUMN DESCRIPTIONS:');
   rows.push('#   timestamp: Time since data start');
@@ -99,88 +170,86 @@ function generateCSV(frames: FusionFrame[]): string {
   rows.push('#   linear_accel_*: Linear acceleration in body frame (gravity removed)');
   rows.push('#   gyro_*: Angular velocity (body frame)');
   rows.push('#   q*: Orientation quaternion (body-to-earth, scalar-first: w,x,y,z)');
+  if (hasGPS) {
+    rows.push('#   gps_lat/gps_lon/gps_hMSL: GPS position (WGS84)');
+    rows.push('#   gps_pos_north/west/up: Local position (meters from origin, NWU)');
+    rows.push('#   gps_vel_north/west/up: GPS velocity (m/s, NWU)');
+    rows.push('#   gps_svel_north/west/up: Smoothed GPS velocity (m/s, NWU, SG filtered)');
+    rows.push('#   gps_accel_north/west/up: GPS-derived acceleration (m/s², NWU)');
+    rows.push('#   gps_hspeed: Horizontal speed (m/s)');
+    rows.push('#   gps_numSV: Number of satellites');
+  }
   rows.push('#');
   
   // Column names header
   const headers = [
     'timestamp',
-    // Rotation matrix (row-major)
     'r00', 'r01', 'r02',
     'r10', 'r11', 'r12',
     'r20', 'r21', 'r22',
-    // Euler angles (degrees)
     'roll', 'pitch', 'yaw',
-    // Raw accelerometer (body frame, g)
     'accel_body_x', 'accel_body_y', 'accel_body_z',
-    // Raw accelerometer rotated to earth frame (g)
     'accel_earth_x', 'accel_earth_y', 'accel_earth_z',
-    // Earth acceleration (gravity removed, g)
     'earth_accel_x', 'earth_accel_y', 'earth_accel_z',
-    // Gravity vector in body frame (g)
     'gravity_body_x', 'gravity_body_y', 'gravity_body_z',
-    // Linear acceleration (body frame, gravity removed, g)
     'linear_accel_x', 'linear_accel_y', 'linear_accel_z',
-    // Raw gyroscope (deg/s)
     'gyro_x', 'gyro_y', 'gyro_z',
-    // Quaternion (for reference)
     'qw', 'qx', 'qy', 'qz'
   ];
   
-  // Units header
   const units = [
-    's',           // timestamp
-    // Rotation matrix (dimensionless)
+    's',
     '-', '-', '-',
     '-', '-', '-',
     '-', '-', '-',
-    // Euler angles
     'deg', 'deg', 'deg',
-    // Accel body
     'g', 'g', 'g',
-    // Accel earth
     'g', 'g', 'g',
-    // Earth accel
     'g', 'g', 'g',
-    // Gravity body
     'g', 'g', 'g',
-    // Linear accel
     'g', 'g', 'g',
-    // Gyro
     'deg/s', 'deg/s', 'deg/s',
-    // Quaternion (dimensionless)
     '-', '-', '-', '-'
   ];
+
+  if (hasGPS) {
+    headers.push(
+      'gps_lat', 'gps_lon', 'gps_hMSL',
+      'gps_pos_north', 'gps_pos_west', 'gps_pos_up',
+      'gps_vel_north', 'gps_vel_west', 'gps_vel_up',
+      'gps_svel_north', 'gps_svel_west', 'gps_svel_up',
+      'gps_accel_north', 'gps_accel_west', 'gps_accel_up',
+      'gps_hspeed', 'gps_numSV'
+    );
+    units.push(
+      'deg', 'deg', 'm',
+      'm', 'm', 'm',
+      'm/s', 'm/s', 'm/s',
+      'm/s', 'm/s', 'm/s',
+      'm/s2', 'm/s2', 'm/s2',
+      'm/s', '-'
+    );
+  }
   
   rows.push(headers.join(','));
   rows.push(units.join(','));
   
   for (const frame of frames) {
-    // Compute rotation matrix from quaternion
     const rotMatrix = quaternionToRotationMatrix(frame.quaternion);
     
-    // Get raw accelerometer data (body frame)
     const accelBody = frame.imu 
       ? { x: frame.imu.ax, y: frame.imu.ay, z: frame.imu.az }
       : { x: 0, y: 0, z: 0 };
     
-    // Rotate raw accelerometer to earth frame
     const accelEarth = rotateToEarthFrame(accelBody, rotMatrix);
-    
-    // Earth acceleration (from AHRS, gravity removed)
     const earthAccel = frame.earthAccel ?? { x: 0, y: 0, z: 0 };
-    
-    // Gravity vector in body frame
     const gravityBody = frame.gravity ?? { x: 0, y: 0, z: 0 };
-    
-    // Linear acceleration (body frame, gravity removed)
     const linearAccel = frame.linearAccel ?? { x: 0, y: 0, z: 0 };
     
-    // Gyroscope data
     const gyro = frame.imu
       ? { x: frame.imu.wx, y: frame.imu.wy, z: frame.imu.wz }
       : { x: 0, y: 0, z: 0 };
     
-    // Convert euler from radians to degrees
     const RAD_TO_DEG = 180 / Math.PI;
     const rollDeg = frame.euler.roll * RAD_TO_DEG;
     const pitchDeg = frame.euler.pitch * RAD_TO_DEG;
@@ -188,32 +257,42 @@ function generateCSV(frames: FusionFrame[]): string {
     
     const row = [
       frame.timestamp.toFixed(6),
-      // Rotation matrix
       rotMatrix[0].toFixed(6), rotMatrix[1].toFixed(6), rotMatrix[2].toFixed(6),
       rotMatrix[3].toFixed(6), rotMatrix[4].toFixed(6), rotMatrix[5].toFixed(6),
       rotMatrix[6].toFixed(6), rotMatrix[7].toFixed(6), rotMatrix[8].toFixed(6),
-      // Euler angles (converted to degrees)
       rollDeg.toFixed(4),
       pitchDeg.toFixed(4),
       yawDeg.toFixed(4),
-      // Accelerometer body frame
       accelBody.x.toFixed(6), accelBody.y.toFixed(6), accelBody.z.toFixed(6),
-      // Accelerometer earth frame
       accelEarth.x.toFixed(6), accelEarth.y.toFixed(6), accelEarth.z.toFixed(6),
-      // Earth acceleration
       earthAccel.x.toFixed(6), earthAccel.y.toFixed(6), earthAccel.z.toFixed(6),
-      // Gravity body frame
       gravityBody.x.toFixed(6), gravityBody.y.toFixed(6), gravityBody.z.toFixed(6),
-      // Linear acceleration
       linearAccel.x.toFixed(6), linearAccel.y.toFixed(6), linearAccel.z.toFixed(6),
-      // Gyroscope
       gyro.x.toFixed(4), gyro.y.toFixed(4), gyro.z.toFixed(4),
-      // Quaternion
       frame.quaternion.w.toFixed(6),
       frame.quaternion.x.toFixed(6),
       frame.quaternion.y.toFixed(6),
       frame.quaternion.z.toFixed(6)
     ];
+
+    // Append GPS columns if available
+    if (hasGPS) {
+      const gps = interpolateGPSAtTime(gpsPoints, frame.timestamp);
+      if (gps) {
+        row.push(
+          gps.lat.toFixed(8), gps.lon.toFixed(8), gps.hMSL.toFixed(2),
+          gps.posNorth.toFixed(3), gps.posWest.toFixed(3), gps.posUp.toFixed(3),
+          gps.velNorth.toFixed(3), gps.velWest.toFixed(3), gps.velUp.toFixed(3),
+          gps.smoothVelNorth.toFixed(3), gps.smoothVelWest.toFixed(3), gps.smoothVelUp.toFixed(3),
+          gps.accelNorth.toFixed(4), gps.accelWest.toFixed(4), gps.accelUp.toFixed(4),
+          gps.smoothHorizontalSpeed.toFixed(3),
+          gps.numSV.toString()
+        );
+      } else {
+        // Outside GPS time coverage — fill with NaN
+        row.push(...Array(17).fill('NaN'));
+      }
+    }
     
     rows.push(row.join(','));
   }
