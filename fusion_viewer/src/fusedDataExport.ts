@@ -170,6 +170,7 @@ function generateCSV(frames: FusionFrame[]): string {
   rows.push('#   linear_accel_*: Linear acceleration in body frame (gravity removed)');
   rows.push('#   gyro_*: Angular velocity (body frame)');
   rows.push('#   q*: Orientation quaternion (body-to-earth, scalar-first: w,x,y,z)');
+  rows.push('#   mag_*: Calibrated magnetometer reading (body frame, µT)');
   if (hasGPS) {
     rows.push('#   gps_lat/gps_lon/gps_hMSL: GPS position (WGS84)');
     rows.push('#   gps_pos_north/west/up: Local position (meters from origin, NWU)');
@@ -194,7 +195,8 @@ function generateCSV(frames: FusionFrame[]): string {
     'gravity_body_x', 'gravity_body_y', 'gravity_body_z',
     'linear_accel_x', 'linear_accel_y', 'linear_accel_z',
     'gyro_x', 'gyro_y', 'gyro_z',
-    'qw', 'qx', 'qy', 'qz'
+    'qw', 'qx', 'qy', 'qz',
+    'mag_x', 'mag_y', 'mag_z'
   ];
   
   const units = [
@@ -209,7 +211,8 @@ function generateCSV(frames: FusionFrame[]): string {
     'g', 'g', 'g',
     'g', 'g', 'g',
     'deg/s', 'deg/s', 'deg/s',
-    '-', '-', '-', '-'
+    '-', '-', '-', '-',
+    'uT', 'uT', 'uT'
   ];
 
   if (hasGPS) {
@@ -272,7 +275,11 @@ function generateCSV(frames: FusionFrame[]): string {
       frame.quaternion.w.toFixed(6),
       frame.quaternion.x.toFixed(6),
       frame.quaternion.y.toFixed(6),
-      frame.quaternion.z.toFixed(6)
+      frame.quaternion.z.toFixed(6),
+      // Calibrated magnetometer (body frame, µT)
+      frame.calibratedMag ? frame.calibratedMag.x.toFixed(4) : 'NaN',
+      frame.calibratedMag ? frame.calibratedMag.y.toFixed(4) : 'NaN',
+      frame.calibratedMag ? frame.calibratedMag.z.toFixed(4) : 'NaN'
     ];
 
     // Append GPS columns if available
