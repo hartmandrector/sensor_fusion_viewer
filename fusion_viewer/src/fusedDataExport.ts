@@ -141,6 +141,7 @@ function generateCSV(frames: FusionFrame[]): string {
   // Check if GPS data is available
   const gpsPoints = gpsState.integrationResult?.points ?? [];
   const hasGPS = gpsPoints.length > 0;
+  const syncOffsetMs = gpsState.syncResult?.sensorToGpsOffsetMs ?? null;
   
   // Documentation header (comment lines starting with #)
   rows.push('# FlySight Sensor Fusion Export');
@@ -159,7 +160,8 @@ function generateCSV(frames: FusionFrame[]): string {
   }
   rows.push('#');
   rows.push('# COLUMN DESCRIPTIONS:');
-  rows.push('#   timestamp: Time since data start');
+  rows.push('#   timestamp: Time since data start (sensor clock)');
+  rows.push('#   gps_time: Absolute UTC time (ISO 8601) — from $TIME sync; empty outside GPS coverage');
   rows.push('#   r00-r22: Rotation matrix (body-to-earth transform, row-major)');
   rows.push('#            To rotate vector v from body to earth: v_earth = R * v_body');
   rows.push('#   roll/pitch/yaw: Euler angles (earth frame)');
@@ -185,6 +187,7 @@ function generateCSV(frames: FusionFrame[]): string {
   // Column names header
   const headers = [
     'timestamp',
+    'gps_time',
     'r00', 'r01', 'r02',
     'r10', 'r11', 'r12',
     'r20', 'r21', 'r22',
@@ -201,6 +204,7 @@ function generateCSV(frames: FusionFrame[]): string {
   
   const units = [
     's',
+    '-',
     '-', '-', '-',
     '-', '-', '-',
     '-', '-', '-',
@@ -258,8 +262,16 @@ function generateCSV(frames: FusionFrame[]): string {
     const pitchDeg = frame.euler.pitch * RAD_TO_DEG;
     const yawDeg = frame.euler.yaw * RAD_TO_DEG;
     
+    // Compute absolute GPS time from sensor timestamp + sync offset
+    let gpsTimeStr = '';
+    if (syncOffsetMs != null) {
+      const absMs = frame.timestamp * 1000 + syncOffsetMs;
+      gpsTimeStr = new Date(absMs).toISOString();
+    }
+
     const row = [
       frame.timestamp.toFixed(6),
+      gpsTimeStr,
       rotMatrix[0].toFixed(6), rotMatrix[1].toFixed(6), rotMatrix[2].toFixed(6),
       rotMatrix[3].toFixed(6), rotMatrix[4].toFixed(6), rotMatrix[5].toFixed(6),
       rotMatrix[6].toFixed(6), rotMatrix[7].toFixed(6), rotMatrix[8].toFixed(6),
