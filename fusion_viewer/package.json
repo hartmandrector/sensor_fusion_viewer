@@ -4,6 +4,7 @@
   "description": "FlySight 2 Sensor Fusion Visualization and Tuning Tool",
   "type": "module",
   "scripts": {
+    "test": "node --test",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"

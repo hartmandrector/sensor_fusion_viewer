@@ -19,6 +19,7 @@ import { Chart, ChartConfiguration, ChartDataset, registerables } from 'chart.js
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { IntegrationResult } from './accelerationIntegration';
 import { debug } from './constants';
+import { getElements } from './uiElements';
 import { 
   shouldIncludeGPS, 
   createGPSTopDownDataset, 
@@ -30,6 +31,7 @@ import {
   getGPSSmoothVelocityData
 } from './gpsCharts';
 import { getGPSDataForCharts } from './gpsIntegration';
+import { renderAttitudeDiagnostics, destroyAttitudeDiagnostics } from './attitudeDiagnosticsCharts';
 
 // Register Chart.js components and plugins
 Chart.register(...registerables, zoomPlugin);
@@ -54,6 +56,7 @@ let speedChart: Chart | null = null;
 
 // Current integration result
 let currentIntegration: IntegrationResult | null = null;
+let showingDiagnostics = false;
 
 // ============================================================================
 // Chart Creation
@@ -706,6 +709,19 @@ function createSpeedChart(
  * Initialize all charts with current integration data
  */
 export function initializeCharts(data: IntegrationResult): void {
+  destroyAttitudeDiagnostics();
+  showingDiagnostics = false;
+  const elements = getElements();
+  elements.integrationChartsView.style.display = 'grid';
+  elements.attitudeDiagnosticsView.hidden = true;
+  elements.showDiagnosticsBtn.hidden = false;
+  elements.showDiagnosticsBtn.disabled = getGPSDataForCharts() === null;
+  elements.showDiagnosticsBtn.title = elements.showDiagnosticsBtn.disabled
+    ? 'Load a matching TRACK.CSV to compare specific-force vectors.' : '';
+  elements.backToIntegrationBtn.hidden = true;
+  getElements().integrationChartTitle.textContent = `Acceleration Integration - ${
+    data.orientationSource === 'device' ? 'Device quaternion / raw acceleration' : 'Viewer-computed'
+  }`;
   currentIntegration = data;
   
   // Get canvas elements
@@ -748,6 +764,8 @@ export function updateComponentChart(component: ComponentType): void {
  * Destroy all charts
  */
 export function destroyCharts(): void {
+  destroyAttitudeDiagnostics();
+  showingDiagnostics = false;
   if (componentChart) {
     componentChart.destroy();
     componentChart = null;
@@ -779,8 +797,43 @@ export function areChartsActive(): boolean {
  */
 export function refreshCharts(): void {
   if (currentIntegration) {
-    initializeCharts(currentIntegration);
+    if (showingDiagnostics) showAttitudeDiagnostics();
+    else initializeCharts(currentIntegration);
   }
+}
+
+export function showAttitudeDiagnostics(): void {
+  if (!currentIntegration) return;
+  const elements = getElements();
+  const integration = currentIntegration;
+  // Release the normal charts while retaining their data for Back navigation.
+  destroyCharts();
+  currentIntegration = integration;
+  showingDiagnostics = true;
+  elements.integrationChartsView.style.display = 'none';
+  elements.attitudeDiagnosticsView.hidden = false;
+  elements.showDiagnosticsBtn.hidden = true;
+  elements.backToIntegrationBtn.hidden = false;
+  elements.integrationChartTitle.textContent = `Attitude diagnostics - ${
+    integration.orientationSource === 'device' ? 'Device' : 'Viewer-computed'
+  }`;
+  elements.chartsPanel.scrollTop = 0;
+  try {
+    const gps = getGPSDataForCharts();
+    if (!gps) throw new Error('Load a matching TRACK.CSV to compare specific-force vectors.');
+    renderAttitudeDiagnostics(integration, gps);
+  } catch (error) {
+    destroyAttitudeDiagnostics();
+    debug.error('Attitude diagnostics failed:', error);
+    elements.diagnosticsStatus.textContent = `Diagnostics unavailable: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    elements.diagnosticsStatus.style.color = '#ff6666';
+  }
+}
+
+export function showIntegrationCharts(): void {
+  if (currentIntegration) initializeCharts(currentIntegration);
 }
 
 // Listen for GPS data loaded event to refresh charts

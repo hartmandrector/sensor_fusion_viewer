@@ -22,6 +22,10 @@ This viewer lets you:
 
 Once settings are validated in post-processing, they can be ported to real-time firmware (C implementation included).
 
+For the next GPS/IMU estimator, see the
+[single-device GPS-velocity-aided error-state filter plan](./GPS-VELOCITY-AIDED-ESKF-PLAN.md).
+This is a planning document, not an implemented filter.
+
 ---
 
 ## Table of Contents
@@ -70,6 +74,140 @@ npm run dev
 3. Press **Play** to step through the data
 4. Adjust **Beta**, **Rejection**, and **Calibration** sliders
 5. Watch the 3D viewer and vector arrows respond in real time
+
+### Experimental sensor protocol
+
+The importer supports both legacy IMU records and experimental records with
+`q_w,q_x,q_y,q_z` appended after temperature. When declared, the `$COL,IMU`
+header determines the quaternion component positions. Each IMU sample retains
+the recorded firmware output as an optional `deviceQuaternion`, unchanged:
+no normalization, coordinate conversion, or viewer calibration is applied to it.
+Legacy samples have no device quaternion; none is synthesized.
+
+Use **Orientation source** under **AHRS Algorithm** to switch between
+**Viewer-computed** (the default) and **Device (recorded)** at the current
+playback timestamp. The source controls the 3D model and orientation readouts;
+switching does not restart playback or change the computed fusion results.
+Device mode is unavailable for recordings without device quaternions.
+Missing device samples hide the model and show `--` instead of silently
+substituting viewer-computed orientation.
+
+Device quaternions use firmware **ENU (East, North, Up)**, as documented in the
+firmware BLE specification and configured by MotionFX. Device mode converts
+ENU to the viewer coordinates and accounts for the model mounting: firmware
+identity means **flat, front face up, LED edge pointing North**, not the viewer's
+upright neutral pose. Rendering composes the ENU-to-Three.js rotation (-90 degrees
+about X), the recorded rotation, and the model-to-firmware body rotation
+(180 degrees about Y), then expresses the result in the NWU basis expected by
+the renderer.
+
+A normalized, converted copy is used for rendering and Euler angles, while
+the quaternion readout retains the original **ENU** components. Thus the displayed
+Euler angles describe the converted model pose, not raw firmware Euler angles.
+Euler roll/yaw are ambiguous at pitch +/-90 degrees; use the 3D model when
+checking those poses. No BLE integer scaling is applied to CSV quaternion values.
+Viewer calibration and filter settings do not alter
+device orientation. Vector overlays are hidden in device mode to avoid mixing
+viewer-derived vectors with firmware orientation. Sensor readouts, AHRS diagnostics
+and exports remain unchanged; exports still contain viewer-computed results.
+For an initial comparison, open two windows and select a different source in
+each; playback is not synchronized between windows.
+
+Calibration time ranges and a synchronized side-by-side display are not implemented yet.
+Logged magnetometer values continue to be treated as raw sensor measurements.
+Incomplete, nonnumeric, nonfinite, or zero-length device quaternions produce
+an import error with the CSV line number rather than a fabricated orientation.
+
+#### Acceleration integration and TRACK comparison
+
+**Calculate Integration** uses the selected orientation source:
+
+- **Viewer-computed:** the existing calibrated viewer Earth-frame acceleration.
+- **Device (recorded):** rotate raw logged accelerometer samples by the normalized
+  recorded body-to-Earth ENU quaternion, subtract 1 g along Earth Up, then convert
+  ENU to NWU (`North = ENU.y`, `West = -ENU.x`, `Up = ENU.z - 1`).
+  No viewer accelerometer offsets, scale matrix, axis remapping, or model-mounting
+  transform is applied in this mode. Recorded samples are not modified.
+
+Load the matching `TRACK.CSV` after the sensor recording to overlay GPS position,
+velocity and derived acceleration using the existing `$TIME` synchronization.
+GPS is a comparison only: it does not initialize or correct integrated velocity.
+Both integration modes still start with zero velocity and position at the chosen
+start time, so moving starts and small acceleration errors can cause large drift.
+
+The integration status and chart title identify the source. Changing source,
+integration start time, or recomputing fusion invalidates old results; click
+**Calculate Integration** again. Device integration fails explicitly if required
+IMU/quaternion data is missing or invalid, rather than substituting viewer results.
+
+#### Attitude diagnostics
+
+After loading matching SENSOR/TRACK recordings, select an orientation source,
+calculate integration, open **Show Integration Charts**, then choose
+**Attitude diagnostics** in the charts header. Use **Back to integration charts**
+to return without losing the integration result.
+
+The diagnostics use the selected source's existing Earth-frame acceleration,
+not the rendered model quaternion. Both force vectors are in NWU and m/s²:
+`IMU force = IMU linear acceleration + [0, 0, 9.80665]`,
+`GPS force = GPS linear acceleration + [0, 0, 9.80665]`.
+Device mode therefore uses recorded orientation and raw accelerometer samples;
+viewer mode uses viewer-calibrated acceleration and computed orientation.
+
+Four linked-time charts show:
+
+- **Specific-force components:** select North, West or Up to overlay the vectors.
+- **Direction disagreement:** angle between the two vectors, in degrees. This
+  is not a full quaternion error: rotation about a single reference vector is
+  unobservable at that instant.
+- **Magnitude/vector disagreement:** signed `|IMU| - |GPS|` and residual norm
+  `|GPS - IMU|`, in m/s².
+- **Force strength:** both vector magnitudes and a **0.1 g heuristic** threshold.
+  If either magnitude is below the threshold, the angular comparison is omitted
+  rather than showing a misleading angle in near-free-fall conditions. Magnitude
+  and residual values remain available. This threshold is not a confidence bound.
+
+Comparisons are sampled at synchronized GPS epochs, with linear interpolation
+of IMU Earth acceleration only inside overlap and after the integration start.
+There is no extrapolation. GPS processing edges and windows spanning GPS gaps
+are excluded; IMU gaps are not interpolated across. A gap means more than three
+times that stream's median sample interval. Excluded points break plotted lines,
+and the status reports valid, weak-force and excluded counts.
+
+GPS acceleration uses the existing centered 21/11/7-sample SG velocity smoothing
+and 21-sample slope calculation. Diagnostics exclude the combined 28-sample
+half-window at both ends and around GPS gaps. This is offline processing using
+future samples. IMU values are **not filtered to the same bandwidth**, so rapid
+motion, GPS latency, calibration, lever-arm effects and noise can produce
+disagreement without an attitude error. Timing adjustments are opt-in through
+the controls below; no lever-arm compensation is applied. These are exploratory diagnostics, not an attitude
+correction or GPS-aided navigation filter.
+
+**GPS timing diagnostics:** enter a manual GPS time shift (-5 to +5 s) and click
+**Apply shift**. Positive moves GPS later; an apparent GPS delay of 1 s would
+require a shift of -1 s. This changes only diagnostic comparisons, not `$TIME`
+synchronization, integration, exports, or stored measurements.
+
+For **Estimate lag**, enter an interval in seconds after integration start and
+choose Up force or force magnitude. The estimator searches absolute shifts from
+-2 to +2 s in 0.02 s increments using mean-removed normalized correlation.
+It uses the same valid IMU epochs for every candidate (at most about 3000),
+interpolates GPS without extrapolation or crossing excluded samples/gaps, and
+requires at least 30 common samples and 0.1 m/s² RMS variation in both signals.
+The suggested shift fills the input but is **not applied** until you click
+**Apply shift**. Weak correlation, broad/competing peaks, and boundary optima are
+flagged. Select a distinct acceleration event and repeat on other intervals:
+this is an exploratory alignment estimate, not a sensor-latency measurement.
+Different smoothing bandwidths, head motion, and attitude errors can mimic lag.
+Force magnitude is less sensitive to heading than individual horizontal axes.
+
+Wheel/pinch zoom and drag pan are synchronized across all four diagnostic
+charts; **Reset zoom** restores the full overlap. Source/input changes require
+recalculation, and loading another sensor recording clears the previous GPS
+association so diagnostics cannot silently use an unrelated track.
+
+Run regression tests from `fusion_viewer` with `npm test`
+(Node.js 22.18+ or 24+ for built-in TypeScript support).
 
 ---
 

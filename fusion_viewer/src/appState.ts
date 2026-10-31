@@ -13,6 +13,7 @@ import type { MagCalibrationResult } from './magCalibration';
 import type { IMUCalibrationResult } from './imuCalibration';
 import type { EllipsoidFitResult } from './ellipsoidFit';
 import type { AccelCalibration6PosResult } from './accelCalibration6Pos';
+import type { OrientationSource } from './orientationSource';
 
 // ============================================================================
 // Algorithm Type
@@ -126,6 +127,7 @@ export const state = {
   
   // Algorithm selection
   algorithm: 'fusion' as AlgorithmType,
+  orientationSource: 'viewer' as OrientationSource,
   madgwickAhrs: null as MadgwickAHRS | null,
   fusionAhrs: null as FusionAhrsAdapter | null,
   
@@ -204,6 +206,7 @@ export function resetPlaybackState(): void {
  */
 export function clearState(): void {
   state.viewer = null;
+  state.orientationSource = 'viewer';
   state.dataset = null;
   state.currentFileName = null;
   state.ahrs = null;

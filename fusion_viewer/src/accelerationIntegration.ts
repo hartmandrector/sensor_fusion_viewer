@@ -13,12 +13,15 @@
 
 import { state, FusionFrame } from './appState';
 import { debug } from './constants';
+import { getDeviceEarthAcceleration } from './deviceAcceleration';
+import type { OrientationSource } from './orientationSource';
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export interface IntegrationResult {
+  orientationSource: OrientationSource;
   // Time array (seconds from data start)
   time: number[];
   
@@ -61,16 +64,19 @@ const G_TO_MS2 = 9.80665;  // 1g in m/s²
  * 
  * @param frames - Array of fusion frames with earth acceleration data
  * @param startTime - Time to start integration (frames before this have v=0, p=0)
+ * @param orientationSource - Viewer Earth acceleration or raw acceleration rotated by device ENU orientation
  * @returns Integration result with time series data for all frames
  */
 export function computeIntegration(
   frames: FusionFrame[],
-  startTime: number
+  startTime: number,
+  orientationSource: OrientationSource = 'viewer'
 ): IntegrationResult {
   const n = frames.length;
   
   // Initialize arrays
   const result: IntegrationResult = {
+    orientationSource,
     time: new Array(n),
     velNorth: new Array(n),
     velWest: new Array(n),
@@ -90,12 +96,9 @@ export function computeIntegration(
   if (n === 0) return result;
   
   // Find start index
-  let startIdx = 0;
-  for (let i = 0; i < n; i++) {
-    if (frames[i].timestamp >= startTime) {
-      startIdx = i;
-      break;
-    }
+  const startIdx = frames.findIndex(frame => frame.timestamp >= startTime);
+  if (!Number.isFinite(startTime) || startIdx < 0) {
+    throw new Error('Integration start time must be within the recording.');
   }
   result.startIndex = startIdx;
   
@@ -111,9 +114,15 @@ export function computeIntegration(
     
     // Get earth acceleration (defaults to 0 if not available)
     // Earth frame is NWU: X=North, Y=West, Z=Up
-    const aN = (frame.earthAccel?.x ?? 0) * G_TO_MS2;
-    const aW = (frame.earthAccel?.y ?? 0) * G_TO_MS2;
-    const aU = (frame.earthAccel?.z ?? 0) * G_TO_MS2;
+    if (orientationSource === 'device' && !frame.imu) {
+      throw new Error(`Missing IMU data at sensor time ${t.toFixed(6)}s`);
+    }
+    const acceleration = orientationSource === 'device' && frame.imu
+      ? getDeviceEarthAcceleration(frame.imu)
+      : frame.earthAccel;
+    const aN = (acceleration?.x ?? 0) * G_TO_MS2;
+    const aW = (acceleration?.y ?? 0) * G_TO_MS2;
+    const aU = (acceleration?.z ?? 0) * G_TO_MS2;
     
     result.time[i] = t;
     result.accelNorth[i] = aN;
@@ -183,5 +192,5 @@ export function getOrComputeIntegration(startTime: number): IntegrationResult | 
     return null;
   }
   
-  return computeIntegration(state.fusionFrames, startTime);
+  return computeIntegration(state.fusionFrames, startTime, state.orientationSource);
 }

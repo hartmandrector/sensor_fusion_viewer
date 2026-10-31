@@ -88,15 +88,10 @@ async function handleTrackFileSelect(event: Event): Promise<void> {
   if (result.success) {
     updateGPSStatus(result.message, false);
     
-    // If charts are visible, trigger a chart update
-    const chartsPanel = document.getElementById('chartsPanel');
-    if (chartsPanel && window.getComputedStyle(chartsPanel).display !== 'none') {
-      // Trigger chart refresh by dispatching a custom event
-      window.dispatchEvent(new CustomEvent('gps-data-loaded'));
-    }
   } else {
     updateGPSStatus(result.message, true);
   }
+  window.dispatchEvent(new CustomEvent('gps-data-loaded'));
   
   // Reset file input so same file can be selected again
   input.value = '';

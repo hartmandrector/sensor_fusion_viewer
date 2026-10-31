@@ -25,6 +25,7 @@
         <div id="threejs-container"></div>
         <div class="viewer-overlay">
           <div class="orientation-display">
+            <div>Source: <span id="displayedOrientationSource">Viewer-computed</span></div>
             <div><span>Heading:</span> <span id="heading">0.0</span>°</div>
             <div><span>Pitch:</span> <span id="pitch">0.0</span>°</div>
             <div><span>Roll:</span> <span id="roll">0.0</span>°</div>
@@ -38,10 +39,14 @@
       <!-- Integration Charts View (hidden by default) -->
       <section class="viewer-panel charts-panel" id="chartsPanel" style="display: none;">
         <div class="charts-header">
-          <h2>Acceleration Integration Results</h2>
+          <h2 id="integrationChartTitle">Acceleration Integration Results</h2>
+          <div class="chart-navigation">
+            <button id="showDiagnosticsBtn" class="back-to-viewer-btn" disabled>Attitude diagnostics</button>
+            <button id="backToIntegrationBtn" class="back-to-viewer-btn" hidden>Back to integration charts</button>
           <button id="backToViewerBtn" class="back-to-viewer-btn">← Back to 3D Viewer</button>
+          </div>
         </div>
-        <div class="charts-container">
+        <div class="charts-container" id="integrationChartsView">
           <div class="chart-cell">
             <div class="chart-header">
               <select id="componentSelect">
@@ -78,6 +83,45 @@
             <canvas id="speedChartCanvas"></canvas>
           </div>
         </div>
+        <div id="attitudeDiagnosticsView" hidden>
+          <div class="diagnostics-toolbar">
+            <label for="diagnosticsComponent">Force component:</label>
+            <select id="diagnosticsComponent">
+              <option value="north">North</option>
+              <option value="west">West</option>
+              <option value="up">Up</option>
+            </select>
+            <button id="resetDiagnosticsZoomBtn" class="back-to-viewer-btn">Reset zoom</button>
+          </div>
+          <p id="diagnosticsStatus" role="status"></p>
+          <div class="diagnostics-toolbar">
+            <label for="diagnosticsGpsShift">GPS time shift (s):</label>
+            <input id="diagnosticsGpsShift" type="number" value="0" min="-5" max="5" step="0.02" />
+            <button id="applyDiagnosticsShift" class="back-to-viewer-btn">Apply shift</button>
+            <label for="lagStart">Lag interval start/end (s after integration start):</label>
+            <input id="lagStart" type="number" value="0" step="0.1" />
+            <input id="lagEnd" type="number" value="60" step="0.1" />
+            <label for="lagSignal">Signal:</label>
+            <select id="lagSignal"><option value="up">Up force</option><option value="magnitude">Force magnitude</option></select>
+            <button id="estimateLagBtn" class="back-to-viewer-btn">Estimate lag</button>
+          </div>
+          <p id="lagStatus" role="status" class="diagnostics-note">Positive shift moves GPS later; delayed GPS needs a negative shift. Diagnostics only; integration and original timestamps are unchanged. Estimation searches +/-2 s at 0.02 s spacing and does not auto-apply.</p>
+          <p class="diagnostics-note">
+            Specific force = linear acceleration minus gravity; NWU gravity is [0, 0, -9.80665] m/s².
+            IMU is interpolated at GPS epochs without extrapolation. GPS uses smoothed velocity and
+            a centered derivative (offline, future samples); IMU is not equivalently smoothed.
+            Timing, different bandwidths, calibration and antenna/IMU lever arms can cause disagreement.
+            Direction is hidden if either force is below 0.1 g (heuristic, not a confidence bound).
+            Processing edges and gaps are excluded. This is not a full quaternion error or a correction.
+            Wheel/pinch zoom and drag pan are linked across these charts.
+          </p>
+          <div class="charts-container diagnostics-grid">
+            <div class="chart-cell"><canvas id="forceComponentCanvas" aria-label="Specific force component comparison"></canvas></div>
+            <div class="chart-cell"><canvas id="forceAngleCanvas" aria-label="Force direction disagreement"></canvas></div>
+            <div class="chart-cell"><canvas id="forceErrorCanvas" aria-label="Force magnitude and vector residual"></canvas></div>
+            <div class="chart-cell"><canvas id="forceMagnitudeCanvas" aria-label="Specific force strength"></canvas></div>
+          </div>
+        </div>
       </section>
 
       <!-- Control Panel -->
@@ -112,6 +156,16 @@
         <!-- Fusion Parameters -->
         <section class="control-section">
           <h2>AHRS Algorithm</h2>
+          <div class="param-control">
+            <label for="orientationSource">Orientation source:</label>
+            <select id="orientationSource">
+              <option value="viewer" selected>Viewer-computed</option>
+              <option value="device" disabled>Device (recorded)</option>
+            </select>
+          </div>
+          <div id="orientationSourceStatus" role="status" style="font-size: 0.75rem; margin-bottom: 0.5rem;">
+            Load a recording to check for device quaternions.
+          </div>
           <div class="param-control">
             <label for="algorithmSelect">Algorithm:</label>
             <select id="algorithmSelect">
@@ -413,6 +467,9 @@
           </div>
           <button id="calculateIntegrationBtn" disabled>Calculate Integration</button>
           <button id="showChartsBtn" disabled>Show Integration Charts</button>
+          <div id="integrationStatus" role="status" style="font-size: 0.75rem; margin-top: 0.5rem;">
+            Integration uses the selected orientation source. Initial velocity is zero.
+          </div>
           
           <!-- GPS Track Data -->
           <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #444;">

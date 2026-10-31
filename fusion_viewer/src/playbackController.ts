@@ -9,6 +9,29 @@ import { state, type FusionFrame } from './appState';
 import { getElements } from './uiElements';
 import { RAD_TO_DEG } from './fusion';
 import { debug } from './constants';
+import { getDisplayOrientation } from './orientationSource';
+import { getIMUReadings } from './csvParser';
+
+export function updateOrientationSourceAvailability(): void {
+  const elements = getElements();
+  const samples = state.dataset ? getIMUReadings(state.dataset) : [];
+  const count = samples.filter(sample => sample.deviceQuaternion).length;
+  const option = elements.orientationSource.querySelector<HTMLOptionElement>('option[value="device"]');
+  if (option) option.disabled = count === 0;
+  if (count === 0) state.orientationSource = 'viewer';
+  elements.orientationSource.value = state.orientationSource;
+  elements.orientationSourceStatus.textContent = count === 0
+    ? 'No device quaternions in this recording. Using viewer-computed orientation.'
+    : `${count.toLocaleString()} / ${samples.length.toLocaleString()} device quaternions available.`;
+}
+
+export function handleOrientationSourceChange(): void {
+  const elements = getElements();
+  state.orientationSource = elements.orientationSource.value === 'device' ? 'device' : 'viewer';
+  updateOrientationSourceAvailability();
+  window.dispatchEvent(new CustomEvent('integration-inputs-changed'));
+  updateDisplay(state.playbackIndex);
+}
 
 // ============================================================================
 // Fusion Frame Computation
@@ -22,6 +45,7 @@ export function computeFusionFrames(): void {
   const elements = getElements();
   
   if (!dataset || !ahrs) return;
+  window.dispatchEvent(new CustomEvent('integration-inputs-changed'));
   
   state.fusionFrames = [];
   ahrs.reset();
@@ -266,16 +290,32 @@ export function updateDisplay(frameIndex: number): void {
   if (!dataset || fusionFrames.length === 0 || !viewer) return;
   
   const frame = fusionFrames[Math.min(frameIndex, fusionFrames.length - 1)];
+  const orientation = getDisplayOrientation(frame, state.orientationSource);
+  const isViewer = state.orientationSource === 'viewer';
+  elements.displayedOrientationSource.textContent = isViewer ? 'Viewer-computed' : 'Device (recorded)';
+  viewer.toggleSensorVectors(isViewer && elements.showSensorVectors.checked);
+  viewer.toggleLinearAccel(isViewer && elements.showLinearAccel.checked);
+  viewer.toggleEarthAccel(isViewer && elements.showEarthAccel.checked);
+  viewer.toggleGravity(isViewer && elements.showGravity.checked);
+  viewer.toggleHeading(isViewer && elements.showHeading.checked);
+  viewer.toggleCompassHeading(isViewer && elements.showCompassHeading.checked);
+  if (!isViewer) {
+    elements.orientationSourceStatus.textContent = orientation
+      ? 'Device: firmware ENU converted to viewer coordinates; identity is flat, front face up, LED North. Angles describe the converted display pose; Q shows recorded ENU components. Vector overlays are hidden. Integration uses the device quaternion and raw acceleration; AHRS diagnostics and exports remain viewer-computed.'
+      : 'No device quaternion at this timestamp. No orientation is displayed.';
+  }
+  // Never substitute computed orientation for a missing recorded sample.
+  viewer.setOrientationVisible(orientation !== null);
   
   // Update 3D viewer
-  viewer.setOrientation(frame.quaternion);
+  if (orientation) viewer.setOrientation(orientation.quaternion);
   
   // Update heading vector (compass direction in world frame)
-  viewer.updateHeadingVector(frame.heading);
+  if (isViewer) viewer.updateHeadingVector(frame.heading);
   
   // Update compass heading vector (FusionCompass algorithm)
   // Compute from current frame's IMU data using FusionCompass (Chapter 7)
-  if (ahrs && frame.imu) {
+  if (isViewer && ahrs && frame.imu) {
     // Get calibrated accel and mag for this frame
     const magCal = ahrs.getMagCalibration();
     
@@ -300,7 +340,7 @@ export function updateDisplay(frameIndex: number): void {
   }
   
   // Update sensor vectors if enabled
-  if (elements.showSensorVectors.checked && frame.imu && ahrs) {
+  if (isViewer && elements.showSensorVectors.checked && frame.imu && ahrs) {
     const imuCal = ahrs.getIMUCalibration();
     
     // Accelerometer (calibrated and remapped)
@@ -342,15 +382,16 @@ export function updateDisplay(frameIndex: number): void {
   }
   
   // Update orientation display
-  elements.heading.textContent = frame.heading.toFixed(1);
-  elements.pitch.textContent = (frame.euler.pitch * RAD_TO_DEG).toFixed(1);
-  elements.roll.textContent = (frame.euler.roll * RAD_TO_DEG).toFixed(1);
+  elements.heading.textContent = orientation ? orientation.heading.toFixed(1) : '--';
+  elements.pitch.textContent = orientation ? (orientation.euler.pitch * RAD_TO_DEG).toFixed(1) : '--';
+  elements.roll.textContent = orientation ? (orientation.euler.roll * RAD_TO_DEG).toFixed(1) : '--';
   
   // Update quaternion display
-  elements.qw.textContent = frame.quaternion.w.toFixed(3);
-  elements.qx.textContent = frame.quaternion.x.toFixed(3);
-  elements.qy.textContent = frame.quaternion.y.toFixed(3);
-  elements.qz.textContent = frame.quaternion.z.toFixed(3);
+  const displayedQuaternion = isViewer ? frame.quaternion : frame.imu?.deviceQuaternion;
+  elements.qw.textContent = displayedQuaternion?.w.toFixed(3) ?? '--';
+  elements.qx.textContent = displayedQuaternion?.x.toFixed(3) ?? '--';
+  elements.qy.textContent = displayedQuaternion?.y.toFixed(3) ?? '--';
+  elements.qz.textContent = displayedQuaternion?.z.toFixed(3) ?? '--';
   
   // Update current time
   const relativeTime = frame.timestamp - dataset.startTime;

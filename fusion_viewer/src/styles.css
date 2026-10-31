@@ -676,6 +676,52 @@ input[type="range"]:disabled::-webkit-slider-thumb {
   color: var(--text-primary);
 }
 
+.chart-navigation,
+.diagnostics-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.charts-header {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+#attitudeDiagnosticsView:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 0.5rem;
+}
+
+.diagnostics-note,
+#diagnosticsStatus {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.diagnostics-toolbar select {
+  background: var(--bg-section);
+  color: var(--text-primary);
+  padding: 0.25rem;
+}
+
+.diagnostics-grid.charts-container {
+  grid-template-rows: repeat(2, minmax(240px, 1fr));
+  min-height: 520px;
+}
+
+@media (max-width: 1200px) {
+  .diagnostics-grid.charts-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(4, 300px);
+    min-height: 1248px;
+  }
+}
+
 .chart-header {
   margin-bottom: 0.5rem;
 }
@@ -810,4 +856,9 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 
 .back-to-viewer-btn:hover {
   background: var(--accent);
+}
+
+.back-to-viewer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

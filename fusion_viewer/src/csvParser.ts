@@ -9,6 +9,8 @@
  * - Data lines: $IMU, $MAG, $BARO, etc.
  */
 
+import type { Quaternion } from './types';
+
 export type SensorType = 'IMU' | 'MAG' | 'BARO' | 'HUM' | 'TIME' | 'VBAT' | 'UNKNOWN';
 
 export interface IMUData {
@@ -21,6 +23,8 @@ export interface IMUData {
   ay: number;         // Accel Y (g)
   az: number;         // Accel Z (g)
   temperature: number; // °C
+  // Recorded firmware output, kept unchanged and separate from viewer fusion.
+  deviceQuaternion?: Quaternion;
 }
 
 export interface MAGData {
@@ -91,8 +95,9 @@ export function parseCSV(content: string): SensorDataset {
   };
   
   let inDataSection = false;
+  let quaternionColumns: number[] | undefined;
   
-  for (const line of lines) {
+  for (const [lineIndex, line] of lines.entries()) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     
@@ -101,6 +106,18 @@ export function parseCSV(content: string): SensorDataset {
       if (trimmed === '$DATA') {
         inDataSection = true;
         continue;
+      }
+
+      if (trimmed.startsWith('$COL,IMU,')) {
+        const columns = trimmed.split(',').slice(2);
+        const indices = ['q_w', 'q_x', 'q_y', 'q_z'].map(name => columns.indexOf(name));
+        if (indices.some(index => index >= 0) && indices.some(index => index < 0)) {
+          throw new Error(`Incomplete device quaternion columns at CSV line ${lineIndex + 1}`);
+        }
+        // Header columns omit the record tag, which occupies index 0 in data rows.
+        quaternionColumns = indices.every(index => index >= 0)
+          ? indices.map(index => index + 1)
+          : [];
       }
       
       // Parse $VAR lines
@@ -127,7 +144,7 @@ export function parseCSV(content: string): SensorDataset {
     }
     
     // Parse data lines
-    const reading = parseDataLine(trimmed);
+    const reading = parseDataLine(trimmed, quaternionColumns, lineIndex + 1);
     if (reading) {
       dataset.readings.push(reading);
       
@@ -189,7 +206,11 @@ export function parseCSV(content: string): SensorDataset {
 /**
  * Parse a single data line
  */
-function parseDataLine(line: string): SensorReading | null {
+function parseDataLine(
+  line: string,
+  quaternionColumns: number[] | undefined,
+  lineNumber: number
+): SensorReading | null {
   const parts = line.split(',');
   if (parts.length < 2) return null;
   
@@ -197,6 +218,20 @@ function parseDataLine(line: string): SensorReading | null {
   
   switch (type) {
     case '$IMU':
+      // Support the appended layout for files without an IMU column declaration.
+      const indices = quaternionColumns ?? (parts.length > 9 ? [9, 10, 11, 12] : []);
+      let deviceQuaternion: Quaternion | undefined;
+      if (indices.length > 0) {
+        const values = indices.map(index => {
+          const value = parts[index]?.trim();
+          return value ? Number(value) : NaN;
+        });
+        if (!values.every(Number.isFinite) || Math.hypot(...values) === 0) {
+          throw new Error(`Invalid device quaternion at CSV line ${lineNumber}`);
+        }
+        const [w, x, y, z] = values;
+        deviceQuaternion = { w, x, y, z };
+      }
       if (parts.length >= 9) {
         return {
           type: 'IMU',
@@ -207,7 +242,8 @@ function parseDataLine(line: string): SensorReading | null {
           ax: parseFloat(parts[5]),
           ay: parseFloat(parts[6]),
           az: parseFloat(parts[7]),
-          temperature: parseFloat(parts[8])
+          temperature: parseFloat(parts[8]),
+          ...(deviceQuaternion ? { deviceQuaternion } : {})
         };
       }
       break;

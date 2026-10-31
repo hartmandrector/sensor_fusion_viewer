@@ -12,6 +12,7 @@ import { calculateAcceleration } from './mathUtils';
 
 // Earth radius for geodetic calculations (meters)
 const EARTH_RADIUS_M = 6371000;
+export const GPS_ACCELERATION_WINDOW_SIZE = 21;
 
 /**
  * GPS Integration State - kept separate from main app state
@@ -39,6 +40,7 @@ export const gpsState: GPSState = {
  * This should be called when the main sensor file is loaded
  */
 export function storeRawSensorCSV(content: string): void {
+  clearGPSData();
   gpsState.rawSensorCSV = content;
 }
 
@@ -147,7 +149,7 @@ export function convertGPSToIntegration(
   }
   
   // Apply Savitzky-Golay smoothing to velocities
-  // Uses 3-pass filter with window sizes: 25, 21, 11
+  // Uses the shared GPS smoothing windows.
   const smoothedVelocities = smoothGPSVelocities(points);
   
   // Update points with smoothed values
@@ -164,10 +166,9 @@ export function convertGPSToIntegration(
   // Calculate acceleration from smoothed velocity using linear regression
   // Uses 21-point centered window for slope estimation (dVel/dTime = acceleration)
   // Odd window size ensures symmetric centering around each point
-  const ACCEL_WINDOW_SIZE = 21;
   const accelerations = calculateAcceleration(
     points,
-    ACCEL_WINDOW_SIZE,
+    GPS_ACCELERATION_WINDOW_SIZE,
     (p) => p.sensorTime,
     (p) => p.smoothVelNorth,
     (p) => p.smoothVelWest,
@@ -196,6 +197,7 @@ export function convertGPSToIntegration(
  * Returns success status and message
  */
 export async function loadTrackCSV(file: File): Promise<{ success: boolean; message: string }> {
+  clearGPSData();
   
   // Check if we have sensor data loaded
   if (!state.dataset) {

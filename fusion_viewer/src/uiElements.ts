@@ -28,6 +28,9 @@ export interface UIElements {
   
   // Algorithm selection
   algorithmSelect: HTMLSelectElement;
+  orientationSource: HTMLSelectElement;
+  orientationSourceStatus: HTMLDivElement;
+  displayedOrientationSource: HTMLSpanElement;
   fusionSettings: HTMLDivElement;
   
   // Filter parameters
@@ -139,6 +142,8 @@ export interface UIElements {
   // Acceleration Integration
   integrationStartSlider: HTMLInputElement;
   integrationStartTime: HTMLSpanElement;
+  integrationStatus: HTMLDivElement;
+  integrationChartTitle: HTMLHeadingElement;
   calculateIntegrationBtn: HTMLButtonElement;
   showChartsBtn: HTMLButtonElement;
   
@@ -151,6 +156,24 @@ export interface UIElements {
   topDownChartCanvas: HTMLCanvasElement;
   profileChartCanvas: HTMLCanvasElement;
   speedChartCanvas: HTMLCanvasElement;
+  showDiagnosticsBtn: HTMLButtonElement;
+  backToIntegrationBtn: HTMLButtonElement;
+  resetDiagnosticsZoomBtn: HTMLButtonElement;
+  integrationChartsView: HTMLDivElement;
+  attitudeDiagnosticsView: HTMLDivElement;
+  diagnosticsComponent: HTMLSelectElement;
+  diagnosticsStatus: HTMLParagraphElement;
+  diagnosticsGpsShift: HTMLInputElement;
+  applyDiagnosticsShift: HTMLButtonElement;
+  lagStart: HTMLInputElement;
+  lagEnd: HTMLInputElement;
+  lagSignal: HTMLSelectElement;
+  estimateLagBtn: HTMLButtonElement;
+  lagStatus: HTMLParagraphElement;
+  forceComponentCanvas: HTMLCanvasElement;
+  forceAngleCanvas: HTMLCanvasElement;
+  forceErrorCanvas: HTMLCanvasElement;
+  forceMagnitudeCanvas: HTMLCanvasElement;
 }
 
 // ============================================================================
@@ -189,6 +212,9 @@ export function initializeElements(): UIElements {
     
     // Algorithm selection
     algorithmSelect: getElement<HTMLSelectElement>('algorithmSelect'),
+    orientationSource: getElement<HTMLSelectElement>('orientationSource'),
+    orientationSourceStatus: getElement<HTMLDivElement>('orientationSourceStatus'),
+    displayedOrientationSource: getElement<HTMLSpanElement>('displayedOrientationSource'),
     fusionSettings: getElement<HTMLDivElement>('fusionSettings'),
     
     // Filter parameters
@@ -300,6 +326,8 @@ export function initializeElements(): UIElements {
     // Acceleration Integration
     integrationStartSlider: getElement<HTMLInputElement>('integrationStartSlider'),
     integrationStartTime: getElement<HTMLSpanElement>('integrationStartTime'),
+    integrationStatus: getElement<HTMLDivElement>('integrationStatus'),
+    integrationChartTitle: getElement<HTMLHeadingElement>('integrationChartTitle'),
     calculateIntegrationBtn: getElement<HTMLButtonElement>('calculateIntegrationBtn'),
     showChartsBtn: getElement<HTMLButtonElement>('showChartsBtn'),
     
@@ -312,6 +340,24 @@ export function initializeElements(): UIElements {
     topDownChartCanvas: getElement<HTMLCanvasElement>('topDownChartCanvas'),
     profileChartCanvas: getElement<HTMLCanvasElement>('profileChartCanvas'),
     speedChartCanvas: getElement<HTMLCanvasElement>('speedChartCanvas'),
+    showDiagnosticsBtn: getElement<HTMLButtonElement>('showDiagnosticsBtn'),
+    backToIntegrationBtn: getElement<HTMLButtonElement>('backToIntegrationBtn'),
+    resetDiagnosticsZoomBtn: getElement<HTMLButtonElement>('resetDiagnosticsZoomBtn'),
+    integrationChartsView: getElement<HTMLDivElement>('integrationChartsView'),
+    attitudeDiagnosticsView: getElement<HTMLDivElement>('attitudeDiagnosticsView'),
+    diagnosticsComponent: getElement<HTMLSelectElement>('diagnosticsComponent'),
+    diagnosticsStatus: getElement<HTMLParagraphElement>('diagnosticsStatus'),
+    diagnosticsGpsShift: getElement<HTMLInputElement>('diagnosticsGpsShift'),
+    applyDiagnosticsShift: getElement<HTMLButtonElement>('applyDiagnosticsShift'),
+    lagStart: getElement<HTMLInputElement>('lagStart'),
+    lagEnd: getElement<HTMLInputElement>('lagEnd'),
+    lagSignal: getElement<HTMLSelectElement>('lagSignal'),
+    estimateLagBtn: getElement<HTMLButtonElement>('estimateLagBtn'),
+    lagStatus: getElement<HTMLParagraphElement>('lagStatus'),
+    forceComponentCanvas: getElement<HTMLCanvasElement>('forceComponentCanvas'),
+    forceAngleCanvas: getElement<HTMLCanvasElement>('forceAngleCanvas'),
+    forceErrorCanvas: getElement<HTMLCanvasElement>('forceErrorCanvas'),
+    forceMagnitudeCanvas: getElement<HTMLCanvasElement>('forceMagnitudeCanvas'),
   };
 }
 

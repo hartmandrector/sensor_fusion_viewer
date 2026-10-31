@@ -392,6 +392,10 @@ export class OrientationViewer {
    * - NWU_Y (West) should become Three.js -X
    * - NWU_Z (Up) should become Three.js +Y
    */
+  setOrientationVisible(visible: boolean): void {
+    this.deviceGroup.visible = visible;
+  }
+
   setOrientation(q: Quaternion): void {
     // Transform quaternion from NWU frame to Three.js frame
     //

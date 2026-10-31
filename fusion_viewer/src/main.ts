@@ -28,6 +28,8 @@ import {
   handleSliderChange,
   handleSpeedChange,
   updateDisplay,
+  handleOrientationSourceChange,
+  updateOrientationSourceAvailability,
 } from './playbackController';
 
 import {
@@ -50,7 +52,14 @@ import { initializeCalibrationExecutive } from './calibrationExecutive';
 import { handleExportFusedData } from './fusedDataExport';
 
 import { computeIntegration } from './accelerationIntegration';
-import { initializeCharts, updateComponentChart, destroyCharts } from './integrationCharts';
+import {
+  initializeCharts, updateComponentChart, destroyCharts,
+  showAttitudeDiagnostics, showIntegrationCharts
+} from './integrationCharts';
+import {
+  updateDiagnosticsComponent, resetDiagnosticsZoom,
+  applyDiagnosticTimeShift, estimateDiagnosticLag
+} from './attitudeDiagnosticsCharts';
 
 // GPS Integration
 import { initializeGPSUI, onSensorFileLoaded, onIntegrationStartTimeChange } from './gpsUIHandler';
@@ -151,6 +160,7 @@ function setupEventListeners(): void {
   
   // Algorithm selection
   elements.algorithmSelect.addEventListener('change', handleAlgorithmChange);
+  elements.orientationSource.addEventListener('change', handleOrientationSourceChange);
   
   // Filter parameters
   elements.betaSlider.addEventListener('input', handleBetaChange);
@@ -204,8 +214,15 @@ function setupEventListeners(): void {
   // Acceleration Integration
   elements.integrationStartSlider.addEventListener('input', handleIntegrationStartChange);
   elements.calculateIntegrationBtn.addEventListener('click', handleCalculateIntegration);
+  window.addEventListener('integration-inputs-changed', invalidateIntegration);
   elements.showChartsBtn.addEventListener('click', handleShowCharts);
   elements.backToViewerBtn.addEventListener('click', handleBackToViewer);
+  elements.showDiagnosticsBtn.addEventListener('click', showAttitudeDiagnostics);
+  elements.backToIntegrationBtn.addEventListener('click', showIntegrationCharts);
+  elements.diagnosticsComponent.addEventListener('change', updateDiagnosticsComponent);
+  elements.resetDiagnosticsZoomBtn.addEventListener('click', resetDiagnosticsZoom);
+  elements.applyDiagnosticsShift.addEventListener('click', applyDiagnosticTimeShift);
+  elements.estimateLagBtn.addEventListener('click', estimateDiagnosticLag);
   elements.componentSelect.addEventListener('change', handleComponentSelectChange);
 }
 
@@ -229,6 +246,10 @@ async function handleFileSelect(event: Event): Promise<void> {
     const content = await file.text();
     state.dataset = parseCSV(content);
     state.currentFileName = file.name;
+    elements.diagnosticsGpsShift.value = '0';
+    elements.lagStart.value = '0';
+    elements.lagEnd.value = Math.min(60, state.dataset.duration).toFixed(1);
+    updateOrientationSourceAvailability();
     
     // Store raw CSV for GPS timestamp sync
     onSensorFileLoaded(content);
@@ -528,6 +549,7 @@ function handleShowCompassHeadingChange(): void {
  * Handle integration start time slider change
  */
 function handleIntegrationStartChange(): void {
+  invalidateIntegration();
   const elements = getElements();
   const value = parseFloat(elements.integrationStartSlider.value);
   elements.integrationStartTime.textContent = value.toFixed(3) + 's';
@@ -541,8 +563,20 @@ function handleIntegrationStartChange(): void {
 }
 
 /**
- * Handle calculate integration button click
+ * Discard results when their source or inputs change.
  */
+function invalidateIntegration(): void {
+  const elements = getElements();
+  elements.lagStatus.textContent = 'Lag estimate cleared: inputs changed. Positive GPS shift moves GPS later; delayed GPS needs a negative shift. Estimation is diagnostic only and does not auto-apply.';
+  state.integrationResult = null;
+  elements.showChartsBtn.disabled = true;
+  elements.integrationStatus.textContent = `Inputs changed. Calculate integration using ${
+    state.orientationSource === 'device' ? 'device quaternions + raw acceleration' : 'viewer-computed acceleration'
+  }. Initial velocity is zero; TRACK is a comparison, not a velocity correction.`;
+  elements.integrationStatus.style.color = '';
+  if (elements.chartsPanel.style.display === 'flex') handleBackToViewer();
+}
+
 function handleCalculateIntegration(): void {
   const elements = getElements();
   
@@ -562,18 +596,33 @@ function handleCalculateIntegration(): void {
   
   console.log(`Computing integration from t=${startTime.toFixed(3)}s`);
   
-  state.integrationResult = computeIntegration(state.fusionFrames, startTime);
+  const chartsPanelVisible = window.getComputedStyle(elements.chartsPanel).display !== 'none';
+  invalidateIntegration();
+  try {
+    state.integrationResult = computeIntegration(state.fusionFrames, startTime, state.orientationSource);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    debug.error('Acceleration integration failed:', error);
+    elements.integrationStatus.textContent = `Integration failed: ${message}`;
+    elements.integrationStatus.style.color = '#ff6666';
+    return;
+  }
+  elements.integrationStatus.textContent = state.orientationSource === 'device'
+    ? 'Device integration: recorded ENU quaternion + raw logged acceleration, gravity removed, converted to NWU. No viewer calibration or remapping. Initial velocity is zero.'
+    : 'Viewer integration: viewer-computed Earth acceleration. Initial velocity is zero.';
   
   if (state.integrationResult) {
     console.log(`Integration complete: ${state.integrationResult.time.length} points, startIndex=${state.integrationResult.startIndex}`);
     elements.showChartsBtn.disabled = false;
     
     // If charts panel is visible, update the charts immediately
-    const chartsPanelVisible = window.getComputedStyle(elements.chartsPanel).display !== 'none';
     console.log(`Charts panel visible: ${chartsPanelVisible}`);
     
     if (chartsPanelVisible) {
       console.log('Updating charts...');
+      elements.viewerPanel.style.display = 'none';
+      elements.chartsPanel.style.display = 'flex';
+      elements.showChartsBtn.textContent = 'Update Charts';
       initializeCharts(state.integrationResult);
     }
   }
