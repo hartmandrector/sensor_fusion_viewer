@@ -32,6 +32,39 @@ export interface UIElements {
   orientationSourceStatus: HTMLDivElement;
   displayedOrientationSource: HTMLSpanElement;
   fusionSettings: HTMLDivElement;
+
+  // GPS-aided ESKF
+  eskfSettings: HTMLDivElement;
+  eskfSeed: HTMLSelectElement;
+  eskfSeedHeadingRow: HTMLDivElement;
+  eskfSeedHeading: HTMLInputElement;
+  eskfHeadingSigma: HTMLInputElement;
+  eskfGyroScale: HTMLInputElement;
+  eskfGpsShift: HTMLInputElement;
+  eskfStartTime: HTMLInputElement;
+  eskfNisGate: HTMLSelectElement;
+  eskfSAccScale: HTMLInputElement;
+  eskfReinit: HTMLInputElement;
+  eskfRunBtn: HTMLButtonElement;
+  eskfChartsBtn: HTMLButtonElement;
+  eskfRunStatus: HTMLDivElement;
+  eskfLiveStatus: HTMLSpanElement;
+  eskfLiveHeadingSigma: HTMLSpanElement;
+  eskfLiveTiltSigma: HTMLSpanElement;
+  eskfLiveGyroBias: HTMLSpanElement;
+  eskfLiveAccelBias: HTMLSpanElement;
+  eskfDiagnosticsView: HTMLDivElement;
+  eskfDiagnosticsStatus: HTMLParagraphElement;
+  resetEskfZoomBtn: HTMLButtonElement;
+  eskfHeadingCanvas: HTMLCanvasElement;
+  eskfSigmaCanvas: HTMLCanvasElement;
+  eskfInnovationCanvas: HTMLCanvasElement;
+  eskfNisCanvas: HTMLCanvasElement;
+  eskfGyroBiasCanvas: HTMLCanvasElement;
+  eskfAccelBiasCanvas: HTMLCanvasElement;
+  integrationInitVelocity: HTMLSelectElement;
+  eskfDropoutCanvas: HTMLCanvasElement;
+  eskfDropoutTable: HTMLElement;
   
   // Filter parameters
   betaSlider: HTMLInputElement;
@@ -41,6 +74,7 @@ export interface UIElements {
   showSensorVectors: HTMLInputElement;
   showLinearAccel: HTMLInputElement;
   showEarthAccel: HTMLInputElement;
+  showVelocity: HTMLInputElement;
   showGravity: HTMLInputElement;
   showHeading: HTMLInputElement;
   showCompassHeading: HTMLInputElement;
@@ -216,6 +250,37 @@ export function initializeElements(): UIElements {
     orientationSourceStatus: getElement<HTMLDivElement>('orientationSourceStatus'),
     displayedOrientationSource: getElement<HTMLSpanElement>('displayedOrientationSource'),
     fusionSettings: getElement<HTMLDivElement>('fusionSettings'),
+    eskfSettings: getElement<HTMLDivElement>('eskfSettings'),
+    eskfSeed: getElement<HTMLSelectElement>('eskfSeed'),
+    eskfSeedHeadingRow: getElement<HTMLDivElement>('eskfSeedHeadingRow'),
+    eskfSeedHeading: getElement<HTMLInputElement>('eskfSeedHeading'),
+    eskfHeadingSigma: getElement<HTMLInputElement>('eskfHeadingSigma'),
+    eskfGyroScale: getElement<HTMLInputElement>('eskfGyroScale'),
+    eskfGpsShift: getElement<HTMLInputElement>('eskfGpsShift'),
+    eskfStartTime: getElement<HTMLInputElement>('eskfStartTime'),
+    eskfNisGate: getElement<HTMLSelectElement>('eskfNisGate'),
+    eskfSAccScale: getElement<HTMLInputElement>('eskfSAccScale'),
+    eskfReinit: getElement<HTMLInputElement>('eskfReinit'),
+    eskfRunBtn: getElement<HTMLButtonElement>('eskfRunBtn'),
+    eskfChartsBtn: getElement<HTMLButtonElement>('eskfChartsBtn'),
+    eskfRunStatus: getElement<HTMLDivElement>('eskfRunStatus'),
+    eskfLiveStatus: getElement<HTMLSpanElement>('eskfLiveStatus'),
+    eskfLiveHeadingSigma: getElement<HTMLSpanElement>('eskfLiveHeadingSigma'),
+    eskfLiveTiltSigma: getElement<HTMLSpanElement>('eskfLiveTiltSigma'),
+    eskfLiveGyroBias: getElement<HTMLSpanElement>('eskfLiveGyroBias'),
+    eskfLiveAccelBias: getElement<HTMLSpanElement>('eskfLiveAccelBias'),
+    eskfDiagnosticsView: getElement<HTMLDivElement>('eskfDiagnosticsView'),
+    eskfDiagnosticsStatus: getElement<HTMLParagraphElement>('eskfDiagnosticsStatus'),
+    resetEskfZoomBtn: getElement<HTMLButtonElement>('resetEskfZoomBtn'),
+    eskfHeadingCanvas: getElement<HTMLCanvasElement>('eskfHeadingCanvas'),
+    eskfSigmaCanvas: getElement<HTMLCanvasElement>('eskfSigmaCanvas'),
+    eskfInnovationCanvas: getElement<HTMLCanvasElement>('eskfInnovationCanvas'),
+    eskfNisCanvas: getElement<HTMLCanvasElement>('eskfNisCanvas'),
+    eskfGyroBiasCanvas: getElement<HTMLCanvasElement>('eskfGyroBiasCanvas'),
+    eskfAccelBiasCanvas: getElement<HTMLCanvasElement>('eskfAccelBiasCanvas'),
+    integrationInitVelocity: getElement<HTMLSelectElement>('integrationInitVelocity'),
+    eskfDropoutCanvas: getElement<HTMLCanvasElement>('eskfDropoutCanvas'),
+    eskfDropoutTable: getElement<HTMLElement>('eskfDropoutTable'),
     
     // Filter parameters
     betaSlider: getElement<HTMLInputElement>('betaSlider'),
@@ -225,6 +290,7 @@ export function initializeElements(): UIElements {
     showSensorVectors: getElement<HTMLInputElement>('showSensorVectors'),
     showLinearAccel: getElement<HTMLInputElement>('showLinearAccel'),
     showEarthAccel: getElement<HTMLInputElement>('showEarthAccel'),
+    showVelocity: getElement<HTMLInputElement>('showVelocity'),
     showGravity: getElement<HTMLInputElement>('showGravity'),
     showHeading: getElement<HTMLInputElement>('showHeading'),
     showCompassHeading: getElement<HTMLInputElement>('showCompassHeading'),

@@ -8,7 +8,7 @@
  *   v_new = v_old + a * dt
  *   p_new = p_old + v_new * dt
  * 
- * Starting conditions: v = [0,0,0], p = [0,0,0] at integration start time
+ * Starting conditions: v = initial velocity (zero, GPS or ESKF), p = [0,0,0] at integration start time
  */
 
 import { state, FusionFrame } from './appState';
@@ -47,7 +47,19 @@ export interface IntegrationResult {
   // Integration start info
   startTime: number;
   startIndex: number;
+  /** Velocity at the start index, m/s NWU. */
+  initialVelocity: Vec3NWU;
+  /** Where the initial velocity came from (for status text). */
+  initialVelocitySource: string;
 }
+
+export interface Vec3NWU {
+  north: number;
+  west: number;
+  up: number;
+}
+
+export const ZERO_VELOCITY: Vec3NWU = { north: 0, west: 0, up: 0 };
 
 // ============================================================================
 // Constants
@@ -65,12 +77,16 @@ const G_TO_MS2 = 9.80665;  // 1g in m/s²
  * @param frames - Array of fusion frames with earth acceleration data
  * @param startTime - Time to start integration (frames before this have v=0, p=0)
  * @param orientationSource - Viewer Earth acceleration or raw acceleration rotated by device ENU orientation
+ * @param initialVelocity - Velocity at the start frame, m/s NWU (default zero)
+ * @param initialVelocitySource - Label recorded in the result
  * @returns Integration result with time series data for all frames
  */
 export function computeIntegration(
   frames: FusionFrame[],
   startTime: number,
-  orientationSource: OrientationSource = 'viewer'
+  orientationSource: OrientationSource = 'viewer',
+  initialVelocity: Vec3NWU = ZERO_VELOCITY,
+  initialVelocitySource = 'zero'
 ): IntegrationResult {
   const n = frames.length;
   
@@ -90,7 +106,9 @@ export function computeIntegration(
     horizontalSpeed: new Array(n),
     horizontalDistance: new Array(n),
     startTime,
-    startIndex: 0
+    startIndex: 0,
+    initialVelocity: { ...initialVelocity },
+    initialVelocitySource,
   };
   
   if (n === 0) return result;
@@ -100,10 +118,13 @@ export function computeIntegration(
   if (!Number.isFinite(startTime) || startIdx < 0) {
     throw new Error('Integration start time must be within the recording.');
   }
+  if (![initialVelocity.north, initialVelocity.west, initialVelocity.up].every(Number.isFinite)) {
+    throw new Error('Initial velocity must be finite.');
+  }
   result.startIndex = startIdx;
   
   // Initialize state at start
-  let vN = 0, vW = 0, vU = 0;
+  let vN = initialVelocity.north, vW = initialVelocity.west, vU = initialVelocity.up;
   let pN = 0, pW = 0, pU = 0;
   let prevTime = frames[startIdx]?.timestamp ?? 0;
   
@@ -140,14 +161,14 @@ export function computeIntegration(
       result.horizontalSpeed[i] = 0;
       result.horizontalDistance[i] = 0;
     } else if (i === startIdx) {
-      // At integration start - initialize to zero
-      result.velNorth[i] = 0;
-      result.velWest[i] = 0;
-      result.velUp[i] = 0;
+      // At integration start: initial velocity, zero position
+      result.velNorth[i] = vN;
+      result.velWest[i] = vW;
+      result.velUp[i] = vU;
       result.posNorth[i] = 0;
       result.posWest[i] = 0;
       result.posUp[i] = 0;
-      result.horizontalSpeed[i] = 0;
+      result.horizontalSpeed[i] = Math.sqrt(vN * vN + vW * vW);
       result.horizontalDistance[i] = 0;
       prevTime = t;
     } else {

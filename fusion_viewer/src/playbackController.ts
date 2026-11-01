@@ -11,6 +11,8 @@ import { RAD_TO_DEG } from './fusion';
 import { debug } from './constants';
 import { getDisplayOrientation } from './orientationSource';
 import { getIMUReadings } from './csvParser';
+import { applyEskfToFrames, updateEskfLiveDisplay } from './eskfController';
+import { getGpsVelocityNwuAt } from './gpsIntegration';
 
 export function updateOrientationSourceAvailability(): void {
   const elements = getElements();
@@ -119,6 +121,7 @@ export function computeFusionFrames(): void {
     }
   }
   
+  if (algorithm === 'eskf') applyEskfToFrames(state.fusionFrames);
   debug.log(`Computed ${state.fusionFrames.length} fusion frames`);
 }
 
@@ -292,13 +295,20 @@ export function updateDisplay(frameIndex: number): void {
   const frame = fusionFrames[Math.min(frameIndex, fusionFrames.length - 1)];
   const orientation = getDisplayOrientation(frame, state.orientationSource);
   const isViewer = state.orientationSource === 'viewer';
-  elements.displayedOrientationSource.textContent = isViewer ? 'Viewer-computed' : 'Device (recorded)';
+  const viewerLabel = frame.eskf ? 'ESKF (GPS-aided)' : 'Viewer-computed';
+  elements.displayedOrientationSource.textContent = isViewer ? viewerLabel : 'Device (recorded)';
   viewer.toggleSensorVectors(isViewer && elements.showSensorVectors.checked);
   viewer.toggleLinearAccel(isViewer && elements.showLinearAccel.checked);
   viewer.toggleEarthAccel(isViewer && elements.showEarthAccel.checked);
   viewer.toggleGravity(isViewer && elements.showGravity.checked);
   viewer.toggleHeading(isViewer && elements.showHeading.checked);
   viewer.toggleCompassHeading(isViewer && elements.showCompassHeading.checked);
+  viewer.toggleVelocity(elements.showVelocity.checked);
+  const eskfVelocity = frame.eskf?.velocity;
+  viewer.updateVelocityVectors(
+    getGpsVelocityNwuAt(frame.timestamp),
+    eskfVelocity ? { x: eskfVelocity[0], y: eskfVelocity[1], z: eskfVelocity[2] } : null
+  );
   if (!isViewer) {
     elements.orientationSourceStatus.textContent = orientation
       ? 'Device: firmware ENU converted to viewer coordinates; identity is flat, front face up, LED North. Angles describe the converted display pose; Q shows recorded ENU components. Vector overlays are hidden. Integration uses the device quaternion and raw acceleration; AHRS diagnostics and exports remain viewer-computed.'
@@ -410,6 +420,7 @@ export function updateDisplay(frameIndex: number): void {
   if (algorithm === 'fusion' && frame.internalStates) {
     updateFusionDisplay(frame.internalStates, frame.biasState);
   }
+  if (algorithm === 'eskf') updateEskfLiveDisplay(frame.eskf);
 }
 
 /**

@@ -259,6 +259,10 @@ export class FusionAhrsAdapter {
   setIMUAxisRemap(remap: AxisRemap): void {
     this.imuAxisRemap = { ...remap };
   }
+
+  getIMUAxisRemap(): AxisRemap {
+    return { ...this.imuAxisRemap };
+  }
   
   setMagAxisRemap(remap: AxisRemap): void {
     this.magAxisRemap = { ...remap };

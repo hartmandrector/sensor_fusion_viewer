@@ -32,6 +32,8 @@ import {
 } from './gpsCharts';
 import { getGPSDataForCharts } from './gpsIntegration';
 import { renderAttitudeDiagnostics, destroyAttitudeDiagnostics } from './attitudeDiagnosticsCharts';
+import { destroyEskfDiagnostics } from './eskfDiagnosticsCharts';
+import { framesUseEskf } from './eskfController';
 
 // Register Chart.js components and plugins
 Chart.register(...registerables, zoomPlugin);
@@ -710,17 +712,19 @@ function createSpeedChart(
  */
 export function initializeCharts(data: IntegrationResult): void {
   destroyAttitudeDiagnostics();
+  destroyEskfDiagnostics();
   showingDiagnostics = false;
   const elements = getElements();
   elements.integrationChartsView.style.display = 'grid';
   elements.attitudeDiagnosticsView.hidden = true;
+  elements.eskfDiagnosticsView.hidden = true;
   elements.showDiagnosticsBtn.hidden = false;
   elements.showDiagnosticsBtn.disabled = getGPSDataForCharts() === null;
   elements.showDiagnosticsBtn.title = elements.showDiagnosticsBtn.disabled
     ? 'Load a matching TRACK.CSV to compare specific-force vectors.' : '';
   elements.backToIntegrationBtn.hidden = true;
   getElements().integrationChartTitle.textContent = `Acceleration Integration - ${
-    data.orientationSource === 'device' ? 'Device quaternion / raw acceleration' : 'Viewer-computed'
+    data.orientationSource === 'device' ? 'Device quaternion / raw acceleration' : framesUseEskf() ? 'ESKF (GPS-aided)' : 'Viewer-computed'
   }`;
   currentIntegration = data;
   
@@ -812,10 +816,12 @@ export function showAttitudeDiagnostics(): void {
   showingDiagnostics = true;
   elements.integrationChartsView.style.display = 'none';
   elements.attitudeDiagnosticsView.hidden = false;
+  elements.eskfDiagnosticsView.hidden = true;
+  destroyEskfDiagnostics();
   elements.showDiagnosticsBtn.hidden = true;
   elements.backToIntegrationBtn.hidden = false;
   elements.integrationChartTitle.textContent = `Attitude diagnostics - ${
-    integration.orientationSource === 'device' ? 'Device' : 'Viewer-computed'
+    integration.orientationSource === 'device' ? 'Device' : framesUseEskf() ? 'ESKF (GPS-aided)' : 'Viewer-computed'
   }`;
   elements.chartsPanel.scrollTop = 0;
   try {

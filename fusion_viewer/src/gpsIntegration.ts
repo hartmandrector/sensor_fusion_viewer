@@ -65,6 +65,45 @@ function latLonToLocalNE(
   return { north, east };
 }
 
+let velocityLookupSource: TrackDataset | null = null;
+let velocityLookup: { t: Float64Array; n: Float64Array; w: Float64Array; u: Float64Array } | null = null;
+
+/**
+ * GPS velocity (NWU, m/s) linearly interpolated at a synchronized sensor time.
+ * Returns null without a synced track, outside its range, or across gaps > 1 s.
+ */
+export function getGpsVelocityNwuAt(sensorTime: number): { x: number; y: number; z: number } | null {
+  const track = gpsState.trackDataset;
+  if (!gpsState.isLoaded || !track) return null;
+  if (velocityLookupSource !== track) {
+    const fixes = track.gnssData
+      .filter(g => g.sensorTimestamp !== null && Number.isFinite(g.velN) && Number.isFinite(g.velE) && Number.isFinite(g.velD))
+      .sort((a, b) => a.sensorTimestamp! - b.sensorTimestamp!);
+    velocityLookup = {
+      t: Float64Array.from(fixes, g => g.sensorTimestamp!),
+      n: Float64Array.from(fixes, g => g.velN),
+      w: Float64Array.from(fixes, g => -g.velE),
+      u: Float64Array.from(fixes, g => -g.velD),
+    };
+    velocityLookupSource = track;
+  }
+  const { t, n, w, u } = velocityLookup!;
+  if (t.length === 0 || sensorTime < t[0] || sensorTime > t[t.length - 1]) return null;
+  let lo = 0, hi = t.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (t[mid] <= sensorTime) lo = mid; else hi = mid;
+  }
+  const span = t[hi] - t[lo];
+  if (span > 1) return null;
+  const a = span > 0 ? (sensorTime - t[lo]) / span : 0;
+  return {
+    x: n[lo] + a * (n[hi] - n[lo]),
+    y: w[lo] + a * (w[hi] - w[lo]),
+    z: u[lo] + a * (u[hi] - u[lo]),
+  };
+}
+
 /**
  * Convert GPS data to integration-compatible format
  * Converts from NED (GPS native) to NWU (integration frame)

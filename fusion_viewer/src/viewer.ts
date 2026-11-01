@@ -44,6 +44,10 @@ export class OrientationViewer {
   private earthAccelLabel: THREE.Sprite | null = null;
   private showLinearAccel: boolean = false;
   private showEarthAccel: boolean = false;
+
+  // Velocity vectors (NWU world frame): GPS and ESKF estimate
+  private velocityObjects: THREE.Object3D[] = [];
+  private showVelocity: boolean = true;
   
   // AHRS gravity vector (estimated gravity direction in body frame)
   private gravityArrow: THREE.Group | null = null;
@@ -798,6 +802,50 @@ export class OrientationViewer {
     }
   }
   
+  /**
+   * Toggle GPS / ESKF velocity vectors (world frame)
+   */
+  toggleVelocity(show: boolean): void {
+    this.showVelocity = show;
+    for (const obj of this.velocityObjects) obj.visible = show;
+  }
+
+  /**
+   * Update velocity vectors in the world frame.
+   * Length is 1 scene unit per 20 m/s, capped at 2.5; hidden below 0.5 m/s.
+   *
+   * @param gpsVelocity GPS velocity in NWU, m/s (V - white)
+   * @param eskfVelocity ESKF velocity estimate in NWU, m/s (Vf - green)
+   */
+  updateVelocityVectors(
+    gpsVelocity: { x: number; y: number; z: number } | null,
+    eskfVelocity: { x: number; y: number; z: number } | null
+  ): void {
+    for (const obj of this.velocityObjects) {
+      this.scene.remove(obj);
+      if (obj instanceof THREE.Sprite) this.disposeLabel(obj);
+      else disposeShadedArrow(obj as THREE.Group);
+    }
+    this.velocityObjects = [];
+    if (!this.showVelocity) return;
+
+    const draw = (v: { x: number; y: number; z: number } | null, color: number, css: string, label: string) => {
+      if (!v) return;
+      const world = new THREE.Vector3(-v.y, v.z, -v.x);  // NWU -> Three.js world
+      const speed = world.length();
+      if (!Number.isFinite(speed) || speed < 0.5) return;
+      const dir = world.clone().normalize();
+      const length = Math.min(speed / 20, 2.5);
+      const arrow = createShadedArrow(dir, new THREE.Vector3(0, 0, 0), length, color);
+      const sprite = this.createTextLabel(label, css);
+      sprite.position.copy(dir.clone().multiplyScalar(length + 0.15));
+      this.scene.add(arrow, sprite);
+      this.velocityObjects.push(arrow, sprite);
+    };
+    draw(gpsVelocity, 0xffffff, '#ffffff', 'V');
+    draw(eskfVelocity, 0x7cfc00, '#7cfc00', 'Vf');
+  }
+
   /**
    * Toggle AHRS gravity vector (body frame, estimated from orientation)
    */

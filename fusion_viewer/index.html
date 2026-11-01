@@ -122,6 +122,34 @@
             <div class="chart-cell"><canvas id="forceMagnitudeCanvas" aria-label="Specific force strength"></canvas></div>
           </div>
         </div>
+        <div id="eskfDiagnosticsView" hidden>
+          <div class="diagnostics-toolbar">
+            <button id="resetEskfZoomBtn" class="back-to-viewer-btn">Reset zoom</button>
+          </div>
+          <p id="eskfDiagnosticsStatus" role="status" class="diagnostics-note" style="white-space: pre-line;"></p>
+          <p class="diagnostics-note">
+            Heading is the horizontal direction of sensor +Y (meaningless when +Y is near vertical).
+            Heading is observable only while the horizontal specific force changes; expect σ to stay near its prior
+            while static or in steady flight. Innovations should look zero-mean noise and NIS should average about 3;
+            a persistent bias or ramp usually means a GPS time shift, gyro scale or lever-arm error.
+            Wheel/pinch zoom and drag pan are linked across these charts.
+          </p>
+          <div class="charts-container diagnostics-grid">
+            <div class="chart-cell"><canvas id="eskfHeadingCanvas" aria-label="ESKF heading"></canvas></div>
+            <div class="chart-cell"><canvas id="eskfSigmaCanvas" aria-label="ESKF attitude uncertainty and status"></canvas></div>
+            <div class="chart-cell"><canvas id="eskfInnovationCanvas" aria-label="GPS velocity innovations"></canvas></div>
+            <div class="chart-cell"><canvas id="eskfNisCanvas" aria-label="Normalized innovation squared"></canvas></div>
+            <div class="chart-cell"><canvas id="eskfGyroBiasCanvas" aria-label="Gyro bias estimate"></canvas></div>
+            <div class="chart-cell"><canvas id="eskfAccelBiasCanvas" aria-label="Accel bias estimate"></canvas></div>
+            <div class="chart-cell"><canvas id="eskfDropoutCanvas" aria-label="Simulated GPS dropout velocity error"></canvas></div>
+          </div>
+          <p class="diagnostics-note">
+            GPS dropout test: from aided frames (every 0.5 s while moving, 5 s while static) the ESKF state is propagated
+            on the IMU alone and compared with the shifted GPS velocity after each duration. "Hold" is the baseline of
+            keeping the last velocity. Smaller IMU error than hold means the integration adds real information.
+          </p>
+          <pre id="eskfDropoutTable" class="diagnostics-note" style="font-family: monospace;"></pre>
+        </div>
       </section>
 
       <!-- Control Panel -->
@@ -171,6 +199,7 @@
             <select id="algorithmSelect">
               <option value="madgwick">Madgwick (Ch. 3)</option>
               <option value="fusion" selected>Fusion (Ch. 7)</option>
+              <option value="eskf">ESKF (GPS-aided)</option>
             </select>
           </div>
           <div class="param-control">
@@ -213,6 +242,68 @@
               </div>
             </div>
           </div>
+
+          <!-- GPS-velocity-aided ESKF settings -->
+          <div id="eskfSettings" style="display: none;">
+            <div style="font-size: 0.75rem; color: #aaa; margin-bottom: 0.5rem;">
+              15-state error-state filter aided by TRACK.CSV velocity. Uses the IMU calibration below; no magnetometer.
+            </div>
+            <div class="param-control">
+              <label for="eskfSeed" title="Attitude at the first usable GPS fix">Seed attitude:</label>
+              <select id="eskfSeed">
+                <option value="device">Device quaternion</option>
+                <option value="viewer">Fusion (Ch. 7) output</option>
+                <option value="level">Level + manual heading</option>
+              </select>
+            </div>
+            <div class="param-control" id="eskfSeedHeadingRow">
+              <label for="eskfSeedHeading" title="Heading of sensor +Y, degrees clockwise from North">+Y heading (°):</label>
+              <input type="number" id="eskfSeedHeading" value="0" step="1" min="-360" max="360" />
+            </div>
+            <div class="param-control">
+              <label for="eskfHeadingSigma" title="Initial 1σ heading uncertainty">Heading σ₀ (°):</label>
+              <input type="number" id="eskfHeadingSigma" value="30" step="1" min="0.5" max="180" />
+            </div>
+            <div class="param-control">
+              <label for="eskfGyroScale" title="Multiplier on bias-corrected gyro rates. New firmware recordings measured ≈1.14.">Gyro scale:</label>
+              <input type="number" id="eskfGyroScale" value="1" step="0.001" min="0.5" max="2" />
+            </div>
+            <div class="param-control">
+              <label for="eskfGpsShift" title="Added to GPS times. Delayed GPS needs a negative value (e.g. −1.0).">GPS time shift (s):</label>
+              <input type="number" id="eskfGpsShift" value="0" step="0.05" min="-5" max="5" />
+            </div>
+            <div class="param-control">
+              <label for="eskfStartTime" title="Earliest initialization time, seconds from start of recording">Start at (s):</label>
+              <input type="number" id="eskfStartTime" value="0" step="0.5" min="0" />
+            </div>
+            <div class="param-control">
+              <label for="eskfNisGate" title="Chi-square gate on GPS velocity innovations (3 DOF)">Innovation gate:</label>
+              <select id="eskfNisGate">
+                <option value="11.345">99%</option>
+                <option value="16.266" selected>99.9%</option>
+                <option value="1e9">Off</option>
+              </select>
+            </div>
+            <div class="param-control">
+              <label for="eskfSAccScale" title="GPS velocity σ = scale × sAcc">sAcc scale:</label>
+              <input type="number" id="eskfSAccScale" value="1" step="0.1" min="0.1" max="10" />
+            </div>
+            <div class="checkbox-control">
+              <input type="checkbox" id="eskfReinit" checked />
+              <label for="eskfReinit">Re-initialize after unhealthy</label>
+            </div>
+            <button id="eskfRunBtn" class="btn" disabled>Run ESKF</button>
+            <button id="eskfChartsBtn" class="btn" disabled>ESKF charts</button>
+            <div id="eskfRunStatus" role="status" style="font-size: 0.75rem; padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 4px; margin-top: 0.5rem; white-space: pre-line;">
+              Load SENSOR.CSV and TRACK.CSV to run.
+            </div>
+            <div class="eskf-live" style="font-size: 0.75rem; padding: 0.5rem; background: rgba(100,200,255,0.1); border-radius: 4px; margin-top: 0.5rem;">
+              <div>Status: <span id="eskfLiveStatus">--</span></div>
+              <div>Heading σ: <span id="eskfLiveHeadingSigma">--</span>° Tilt σ: <span id="eskfLiveTiltSigma">--</span>°</div>
+              <div>Gyro bias (°/s): <span id="eskfLiveGyroBias">--</span></div>
+              <div>Accel bias (mg): <span id="eskfLiveAccelBias">--</span></div>
+            </div>
+          </div>
           
           <div class="checkbox-control">
             <input type="checkbox" id="initFromSensors" checked />
@@ -233,6 +324,10 @@
           <div class="checkbox-control">
             <input type="checkbox" id="showEarthAccel" checked />
             <label for="showEarthAccel">Show Earth Accel (E - orange)</label>
+          </div>
+          <div class="checkbox-control" title="Drawn whenever TRACK.CSV is loaded. V = GPS velocity as recorded (includes GPS lag); Vf = ESKF velocity estimate. 1 grid unit = 20 m/s.">
+            <input type="checkbox" id="showVelocity" checked />
+            <label for="showVelocity">Show Velocity (V - white GPS, Vf - green ESKF)</label>
           </div>
           <div class="checkbox-control">
             <input type="checkbox" id="showGravity" />
@@ -465,10 +560,19 @@
             <input type="range" id="integrationStartSlider" min="0" max="100" value="0" step="0.001" disabled />
             <span id="integrationStartTime" class="slider-value">0.000s</span>
           </div>
+          <div class="param-control">
+            <label for="integrationInitVelocity" title="Velocity at the start time. GPS uses the ESKF panel's GPS time shift (delayed GPS needs a negative shift). ESKF needs the ESKF algorithm and an aided/coasting filter at the start time.">Initial velocity:</label>
+            <select id="integrationInitVelocity">
+              <option value="auto" selected>Auto (ESKF → GPS → zero)</option>
+              <option value="eskf">ESKF velocity</option>
+              <option value="gps">GPS velocity (shifted)</option>
+              <option value="zero">Zero</option>
+            </select>
+          </div>
           <button id="calculateIntegrationBtn" disabled>Calculate Integration</button>
           <button id="showChartsBtn" disabled>Show Integration Charts</button>
           <div id="integrationStatus" role="status" style="font-size: 0.75rem; margin-top: 0.5rem;">
-            Integration uses the selected orientation source. Initial velocity is zero.
+            Integration uses the selected orientation source. Initial velocity: ESKF, else GPS, else zero.
           </div>
           
           <!-- GPS Track Data -->

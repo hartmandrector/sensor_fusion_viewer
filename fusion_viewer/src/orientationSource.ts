@@ -23,6 +23,11 @@ export function getDisplayOrientation(frame: FusionFrame, source: OrientationSou
     y: (recorded.z - recorded.y) * scale,
     z: (recorded.w + recorded.x) * scale
   };
+  return { quaternion, ...eulerAndHeading(quaternion) };
+}
+
+/** ZYX Euler angles (rad) and heading (deg, 0–360) of a viewer-convention quaternion. */
+export function eulerAndHeading(quaternion: Quaternion) {
   const { w, x, y, z } = quaternion;
   const euler = {
     roll: Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)),
@@ -30,5 +35,5 @@ export function getDisplayOrientation(frame: FusionFrame, source: OrientationSou
     yaw: Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
   };
   const heading = (euler.yaw * 180 / Math.PI + 360) % 360;
-  return { quaternion, euler, heading };
+  return { euler, heading };
 }

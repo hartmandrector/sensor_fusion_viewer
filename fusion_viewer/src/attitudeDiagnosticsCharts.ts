@@ -8,6 +8,7 @@ import { DEFAULT_GPS_SMOOTHING_WINDOWS } from './sgFilter';
 import { getElements } from './uiElements';
 import { estimateGPSLag } from './gpsLag';
 import { debug } from './constants';
+import { framesUseEskf } from './eskfController';
 
 type PlotPoint = { x: number; y: number | null };
 type DiagnosticChart = Chart<'line', PlotPoint[]>;
@@ -168,7 +169,9 @@ export function renderAttitudeDiagnostics(integration: IntegrationResult, gps: G
   currentInputs = { integration, gps };
   diagnostics = computed;
   elements.diagnosticsStatus.textContent = `${
-    integration.orientationSource === 'device' ? 'Device quaternion + raw accelerometer' : 'Viewer-computed calibrated acceleration'
+    integration.orientationSource === 'device' ? 'Device quaternion + raw accelerometer'
+      : framesUseEskf() ? 'ESKF (GPS-aided) attitude + calibrated acceleration (not independent: ESKF already fused this GPS)'
+      : 'Viewer-computed calibrated acceleration'
   } | GPS shift ${shift.toFixed(2)}s | ${diagnostics.validCount.toLocaleString()} direction comparisons, ${
     diagnostics.weakCount.toLocaleString()} weak-force samples, ${
     diagnostics.excludedCount.toLocaleString()} edge/gap/invalid samples excluded.`;

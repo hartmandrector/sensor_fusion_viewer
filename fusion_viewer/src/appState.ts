@@ -19,7 +19,7 @@ import type { OrientationSource } from './orientationSource';
 // Algorithm Type
 // ============================================================================
 
-export type AlgorithmType = 'madgwick' | 'fusion';
+export type AlgorithmType = 'madgwick' | 'fusion' | 'eskf';
 
 // ============================================================================
 // AHRS Interface (common between algorithms)
@@ -107,6 +107,34 @@ export interface FusionFrame {
   // Fusion Ch.7 specific
   internalStates?: FusionInternalStates;
   biasState?: BiasState;
+  // GPS-aided ESKF specific
+  eskf?: EskfFrameInfo;
+}
+
+export interface EskfFrameInfo {
+  status: import('./eskf/filter').FilterStatus;
+  headingSigmaDeg: number;
+  tiltSigmaDeg: number;
+  gyroBiasDps: [number, number, number];
+  accelBiasMg: [number, number, number];
+  /** NWU velocity, m/s. */
+  velocity: [number, number, number];
+}
+
+/** Latest ESKF replay and the inputs it was computed from. */
+export interface EskfRunState {
+  inputKey: string;
+  seedKey: string;
+  result: import('./eskf/replay').ReplayResult | null;
+  error: string | null;
+  elapsedMs: number;
+  /** Inputs the replay ran on (reused by the GPS-dropout test). */
+  inputs: {
+    imu: import('./eskf/replay').ReplayImuSample[];
+    gnss: import('./eskf/replay').ReplayGnssFix[];
+    calibration: import('./eskf/calibration').ImuCalibration;
+    gpsShift: number;
+  };
 }
 
 // ============================================================================
@@ -140,6 +168,7 @@ export const state = {
   
   // Pre-computed fusion results
   fusionFrames: [] as FusionFrame[],
+  eskfRun: null as EskfRunState | null,
   
   // Calibration results
   lastMagCalibration: null as MagCalibrationResult | null,
@@ -216,6 +245,7 @@ export function clearState(): void {
   state.lastFrameTime = 0;
   state.currentSimTime = 0;
   state.fusionFrames = [];
+  state.eskfRun = null;
   state.lastMagCalibration = null;
   state.lastIMUCalibration = null;
 }

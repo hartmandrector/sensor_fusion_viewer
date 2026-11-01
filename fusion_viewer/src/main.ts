@@ -51,7 +51,8 @@ import { initializeCalibrationExecutive } from './calibrationExecutive';
 
 import { handleExportFusedData } from './fusedDataExport';
 
-import { computeIntegration } from './accelerationIntegration';
+import { computeIntegration, ZERO_VELOCITY, type Vec3NWU } from './accelerationIntegration';
+import { getGpsVelocityNwuAt } from './gpsIntegration';
 import {
   initializeCharts, updateComponentChart, destroyCharts,
   showAttitudeDiagnostics, showIntegrationCharts
@@ -63,6 +64,10 @@ import {
 
 // GPS Integration
 import { initializeGPSUI, onSensorFileLoaded, onIntegrationStartTimeChange } from './gpsUIHandler';
+
+// GPS-aided ESKF
+import { framesUseEskf, onEskfDatasetLoaded, requestEskfRun, updateEskfSeedVisibility } from './eskfController';
+import { destroyEskfDiagnostics, resetEskfDiagnosticsZoom, showEskfDiagnostics } from './eskfDiagnosticsCharts';
 
 // ============================================================================
 // Initialization
@@ -121,7 +126,7 @@ function init(): void {
   
   // Set active algorithm based on UI
   state.algorithm = elements.algorithmSelect.value as AlgorithmType;
-  state.ahrs = state.algorithm === 'fusion' ? state.fusionAhrs : state.madgwickAhrs;
+  state.ahrs = state.algorithm === 'madgwick' ? state.madgwickAhrs : state.fusionAhrs;
   
   // Show/hide fusion-specific settings
   updateFusionSettingsVisibility();
@@ -169,6 +174,9 @@ function setupEventListeners(): void {
   elements.showSensorVectors.addEventListener('change', handleShowVectorsChange);
   elements.showLinearAccel.addEventListener('change', handleShowLinearAccelChange);
   elements.showEarthAccel.addEventListener('change', handleShowEarthAccelChange);
+  elements.showVelocity.addEventListener('change', () => {
+    if (state.viewer) updateDisplay(state.playbackIndex);
+  });
   elements.showGravity.addEventListener('change', handleShowGravityChange);
   elements.showHeading.addEventListener('change', handleShowHeadingChange);
   elements.showCompassHeading.addEventListener('change', handleShowCompassHeadingChange);
@@ -213,6 +221,7 @@ function setupEventListeners(): void {
   
   // Acceleration Integration
   elements.integrationStartSlider.addEventListener('input', handleIntegrationStartChange);
+  elements.integrationInitVelocity.addEventListener('change', invalidateIntegration);
   elements.calculateIntegrationBtn.addEventListener('click', handleCalculateIntegration);
   window.addEventListener('integration-inputs-changed', invalidateIntegration);
   elements.showChartsBtn.addEventListener('click', handleShowCharts);
@@ -224,6 +233,24 @@ function setupEventListeners(): void {
   elements.applyDiagnosticsShift.addEventListener('click', applyDiagnosticTimeShift);
   elements.estimateLagBtn.addEventListener('click', estimateDiagnosticLag);
   elements.componentSelect.addEventListener('change', handleComponentSelectChange);
+
+  // GPS-aided ESKF
+  for (const input of [
+    elements.eskfSeed, elements.eskfSeedHeading, elements.eskfHeadingSigma, elements.eskfGyroScale,
+    elements.eskfGpsShift, elements.eskfStartTime, elements.eskfNisGate, elements.eskfSAccScale, elements.eskfReinit,
+  ]) {
+    input.addEventListener('change', () => {
+      updateEskfSeedVisibility();
+      recomputeEskf();
+    });
+  }
+  elements.eskfRunBtn.addEventListener('click', () => recomputeEskf(true));
+  elements.eskfChartsBtn.addEventListener('click', handleShowEskfCharts);
+  elements.resetEskfZoomBtn.addEventListener('click', resetEskfDiagnosticsZoom);
+  window.addEventListener('gps-data-loaded', () => {
+    recomputeEskf();
+    if (state.viewer && state.dataset) updateDisplay(state.playbackIndex);
+  });
 }
 
 // ============================================================================
@@ -253,6 +280,7 @@ async function handleFileSelect(event: Event): Promise<void> {
     
     // Store raw CSV for GPS timestamp sync
     onSensorFileLoaded(content);
+    onEskfDatasetLoaded();
     
     debug.log(`Loaded ${state.dataset.readings.length} sensor readings`);
     debug.log(`Firmware: ${state.dataset.firmwareVersion}`);
@@ -329,16 +357,17 @@ async function handleFileSelect(event: Event): Promise<void> {
 function handleAlgorithmChange(): void {
   const elements = getElements();
   state.algorithm = elements.algorithmSelect.value as AlgorithmType;
+  const usesFusion = state.algorithm !== 'madgwick';
   
-  // Switch active AHRS
-  state.ahrs = state.algorithm === 'fusion' ? state.fusionAhrs : state.madgwickAhrs;
+  // Switch active AHRS (the ESKF reuses the Fusion AHRS calibration and output)
+  state.ahrs = usesFusion ? state.fusionAhrs : state.madgwickAhrs;
   
   // Copy calibration between algorithms
   if (state.fusionAhrs && state.madgwickAhrs) {
-    const imuCal = state.algorithm === 'fusion' 
+    const imuCal = usesFusion 
       ? state.madgwickAhrs.getIMUCalibration()
       : state.fusionAhrs.getIMUCalibration();
-    const magCal = state.algorithm === 'fusion'
+    const magCal = usesFusion
       ? state.madgwickAhrs.getMagCalibration()
       : state.fusionAhrs.getMagCalibration();
     
@@ -370,6 +399,23 @@ function handleAlgorithmChange(): void {
 function updateFusionSettingsVisibility(): void {
   const elements = getElements();
   elements.fusionSettings.style.display = state.algorithm === 'fusion' ? 'block' : 'none';
+  elements.eskfSettings.style.display = state.algorithm === 'eskf' ? 'block' : 'none';
+}
+
+/**
+ * Recompute frames after an ESKF input change (or an explicit run request).
+ */
+function recomputeEskf(force = false): void {
+  if (force) requestEskfRun();
+  if (state.dataset && state.algorithm === 'eskf') {
+    computeFusionFrames();
+    updateDisplay(state.playbackIndex);
+  }
+}
+
+function handleShowEskfCharts(): void {
+  destroyCharts();
+  showEskfDiagnostics();
 }
 
 /**
@@ -572,9 +618,43 @@ function invalidateIntegration(): void {
   elements.showChartsBtn.disabled = true;
   elements.integrationStatus.textContent = `Inputs changed. Calculate integration using ${
     state.orientationSource === 'device' ? 'device quaternions + raw acceleration' : 'viewer-computed acceleration'
-  }. Initial velocity is zero; TRACK is a comparison, not a velocity correction.`;
+  }. TRACK is a comparison, not a velocity correction.`;
   elements.integrationStatus.style.color = '';
   if (elements.chartsPanel.style.display === 'flex') handleBackToViewer();
+}
+
+/**
+ * Initial velocity for the integration per the panel selection. ESKF uses the
+ * filter velocity at the start frame (aided/coasting only); GPS uses the
+ * TRACK velocity at startTime − shift (ESKF panel's GPS time shift).
+ */
+function resolveInitialVelocity(startTime: number): { velocity: Vec3NWU; source: string } {
+  const elements = getElements();
+  const mode = elements.integrationInitVelocity.value;
+  if (mode === 'zero') return { velocity: ZERO_VELOCITY, source: 'zero' };
+
+  if (mode === 'eskf' || mode === 'auto') {
+    const frame = framesUseEskf() ? state.fusionFrames.find(f => f.timestamp >= startTime) : undefined;
+    const eskf = frame?.eskf;
+    if (eskf && (eskf.status === 'aided' || eskf.status === 'coasting')) {
+      const [north, west, up] = eskf.velocity;
+      return { velocity: { north, west, up }, source: `ESKF (${eskf.status})` };
+    }
+    if (mode === 'eskf') {
+      throw new Error('ESKF initial velocity needs the ESKF algorithm with an aided or coasting filter at the start time.');
+    }
+  }
+
+  const rawShift = Number(elements.eskfGpsShift.value);
+  const shift = Number.isFinite(rawShift) ? rawShift : 0;
+  const gps = getGpsVelocityNwuAt(startTime - shift);
+  if (gps) {
+    return { velocity: { north: gps.x, west: gps.y, up: gps.z }, source: `GPS (shift ${shift.toFixed(2)} s)` };
+  }
+  if (mode === 'gps') {
+    throw new Error('GPS initial velocity needs a synchronized TRACK.CSV with a fix near the start time.');
+  }
+  return { velocity: ZERO_VELOCITY, source: 'zero (no ESKF/GPS velocity at start)' };
 }
 
 function handleCalculateIntegration(): void {
@@ -599,7 +679,10 @@ function handleCalculateIntegration(): void {
   const chartsPanelVisible = window.getComputedStyle(elements.chartsPanel).display !== 'none';
   invalidateIntegration();
   try {
-    state.integrationResult = computeIntegration(state.fusionFrames, startTime, state.orientationSource);
+    const init = resolveInitialVelocity(startTime);
+    state.integrationResult = computeIntegration(
+      state.fusionFrames, startTime, state.orientationSource, init.velocity, init.source,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     debug.error('Acceleration integration failed:', error);
@@ -607,9 +690,13 @@ function handleCalculateIntegration(): void {
     elements.integrationStatus.style.color = '#ff6666';
     return;
   }
-  elements.integrationStatus.textContent = state.orientationSource === 'device'
-    ? 'Device integration: recorded ENU quaternion + raw logged acceleration, gravity removed, converted to NWU. No viewer calibration or remapping. Initial velocity is zero.'
-    : 'Viewer integration: viewer-computed Earth acceleration. Initial velocity is zero.';
+  const { initialVelocity: v0, initialVelocitySource } = state.integrationResult;
+  const initText = `Initial velocity: ${initialVelocitySource} [N ${v0.north.toFixed(1)}, W ${v0.west.toFixed(1)}, U ${v0.up.toFixed(1)}] m/s.`;
+  elements.integrationStatus.textContent = (state.orientationSource === 'device'
+    ? 'Device integration: recorded ENU quaternion + raw logged acceleration, gravity removed, converted to NWU. No viewer calibration or remapping. '
+    : framesUseEskf()
+      ? 'Viewer integration: ESKF (GPS-aided) attitude with calibrated acceleration (open loop after the start). '
+      : 'Viewer integration: viewer-computed Earth acceleration. ') + initText;
   
   if (state.integrationResult) {
     console.log(`Integration complete: ${state.integrationResult.time.length} points, startIndex=${state.integrationResult.startIndex}`);
@@ -662,6 +749,8 @@ function handleBackToViewer(): void {
   
   // Destroy charts to free memory
   destroyCharts();
+  destroyEskfDiagnostics();
+  elements.eskfDiagnosticsView.hidden = true;
   
   // Update button text
   elements.showChartsBtn.textContent = 'Show Integration Charts';
