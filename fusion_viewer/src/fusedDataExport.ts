@@ -16,6 +16,7 @@ import { getElements } from './uiElements';
 import { debug } from './constants';
 import { gpsState } from './gpsIntegration';
 import type { GPSIntegrationPoint } from './gpsTypes';
+import { remapMatrix, IDENTITY_REMAP } from './eskf/calibration';
 
 // ============================================================================
 // Quaternion to Rotation Matrix
@@ -162,12 +163,15 @@ function generateCSV(frames: FusionFrame[]): string {
   rows.push('# COLUMN DESCRIPTIONS:');
   rows.push('#   timestamp: Time since data start (sensor clock)');
   rows.push('#   gps_time: Absolute UTC time (ISO 8601) — from $TIME sync; empty outside GPS coverage');
-  rows.push('#   r00-r22: Rotation matrix (body-to-earth transform, row-major)');
-  rows.push('#            To rotate vector v from body to earth: v_earth = R * v_body');
+  rows.push('#   r00-r22: Rotation matrix of q (row-major), acting on the viewer algorithm frame');
+  rows.push('#            A = [body_z, body_x, body_y] of the axis-remapped body vector:');
+  rows.push('#            v_earth = R * [v_body_z, v_body_x, v_body_y]');
   rows.push('#   roll/pitch/yaw: Euler angles (earth frame)');
-  rows.push('#   accel_body_*: Raw accelerometer reading (body frame)');
-  rows.push('#   accel_earth_*: Raw accelerometer rotated to earth frame');
-  rows.push('#   earth_accel_*: Acceleration in earth frame with gravity removed');
+  rows.push('#   accel_body_*: Raw accelerometer reading (sensor axes, uncalibrated)');
+  rows.push('#   accel_earth_*: Raw accelerometer (axis-remapped) rotated to earth frame, gravity included');
+  rows.push(state.algorithm === 'eskf'
+    ? '#   earth_accel_*: ESKF acceleration in earth frame, gravity removed (calibrated, accel bias estimate removed)'
+    : '#   earth_accel_*: Acceleration in earth frame with gravity removed');
   rows.push('#   gravity_body_*: Estimated gravity vector in body frame');
   rows.push('#   linear_accel_*: Linear acceleration in body frame (gravity removed)');
   rows.push('#   gyro_*: Angular velocity (body frame)');
@@ -241,6 +245,7 @@ function generateCSV(frames: FusionFrame[]): string {
   rows.push(headers.join(','));
   rows.push(units.join(','));
   
+  const M = remapMatrix(state.fusionAhrs?.getIMUAxisRemap() ?? IDENTITY_REMAP);
   for (const frame of frames) {
     const rotMatrix = quaternionToRotationMatrix(frame.quaternion);
     
@@ -248,7 +253,11 @@ function generateCSV(frames: FusionFrame[]): string {
       ? { x: frame.imu.ax, y: frame.imu.ay, z: frame.imu.az }
       : { x: 0, y: 0, z: 0 };
     
-    const accelEarth = rotateToEarthFrame(accelBody, rotMatrix);
+    // q acts on the algorithm frame A = [Bz, Bx, By] of the remapped body vector B = M·raw.
+    const bx = M[0] * accelBody.x + M[1] * accelBody.y + M[2] * accelBody.z;
+    const by = M[3] * accelBody.x + M[4] * accelBody.y + M[5] * accelBody.z;
+    const bz = M[6] * accelBody.x + M[7] * accelBody.y + M[8] * accelBody.z;
+    const accelEarth = rotateToEarthFrame({ x: bz, y: bx, z: by }, rotMatrix);
     const earthAccel = frame.earthAccel ?? { x: 0, y: 0, z: 0 };
     const gravityBody = frame.gravity ?? { x: 0, y: 0, z: 0 };
     const linearAccel = frame.linearAccel ?? { x: 0, y: 0, z: 0 };
